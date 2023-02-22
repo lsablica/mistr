@@ -1,5 +1,5 @@
 ## Test environments
-* local Ubuntu 16.04.1 LTS, R 3.6.3
+* local Ubuntu 18.04.1 LTS, R 4.1.2
 * win-builder 
 * R-hub
 

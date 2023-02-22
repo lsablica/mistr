@@ -2,7 +2,7 @@
 
 ## Minor improvements and fixes
 
-*
+* tweaked citation
 
 # mistr 0.0.5
 

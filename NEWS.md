@@ -1,3 +1,9 @@
+# mistr 0.0.7
+
+## Minor improvements and fixes
+
+*
+
 # mistr 0.0.6
 
 ## Minor improvements and fixes

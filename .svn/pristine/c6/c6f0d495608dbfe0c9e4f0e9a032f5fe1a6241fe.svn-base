@@ -1,0 +1,14 @@
+citHeader("To cite mistr in publications use:")
+
+bibentry("Article",
+         title = "{mistr: A Computational Framework for Mixture and Composite Distributions}",
+         author =
+             c(person("Lukas", "Sablica"),
+               person("Kurt", "Hornik")),
+         journal = "{The R Journal}",
+         year = "2019",
+         doi = "10.32614/RJ-2019-049",
+         url = "https://journal.r-project.org/archive/2019/RJ-2019-049/index.html"
+)
+
+

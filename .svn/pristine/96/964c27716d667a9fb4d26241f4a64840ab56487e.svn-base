@@ -1,0 +1,69 @@
+\documentclass{article}
+\usepackage{hyperref}
+\usepackage[margin=3cm]{geometry}
+\title{\textbf{Point-by-point response letter to comments on
+``mistr: A Computational Framework for Mixture and Composite Distributions"} \\ }
+\newcommand{\pkg}[1]{\textbf{\textsf{#1}}}
+\date{}
+\let\code=\texttt
+\begin{document}
+\maketitle
+
+In the following, we repeat all comments by the reviewer in italic font and provide
+comments and explanations as well as elaborate which changes were incorporated in
+the manuscript to address the issues raised.
+
+We hope that the revised version of our manuscript is suitable for publication in
+{\it The R Journal}.
+
+
+\section*{Minor comments}
+\begin{enumerate}
+\item All figures:\\
+{\it  Please include some captions and legends for figures.
+} \\
+{\bf RESPONSE:} Thank you for this comment. We have tried to write this paper in the Sweave-report type of format, so that the paper (combined with the more robust vignette) can be also used as a guidebook for the rich functionalities of  \pkg{mistr}.  In this manuscript, since the plots follow the code that generates them and no other invisible adjustments have been made, we are of the belief that the captions seem unnecessary and would repeat what is said in the code and its description. However, if the reviewer is of the opinion that the readers might benefit from the included captions also after the above comments, we will include them.
+
+\item P2, L5:\\
+{\it
+May change ``for modeling of the left tail" to ``for modeling of fat/heavy tails".
+} \\
+{\bf RESPONSE:} We have changed the sentence  ``for modeling of the left tail" to ``for modeling of heavy left tails". 
+
+\item   P6:\\
+{\it 
+New subsubsections may be needed for the contexts. This top paragraph of this page is
+currently under a subsection ``Adding transformation" which may not be appropriated
+for presenting the visual features of \pkg{mistr}. The bottom of this page introduces the
+other idea, order statistics, for distribution quantiles. The notations of this paragraph
+may need further details. E.g. what are $X$ and $n$? The reference to the wiki page may
+be replaced by literatures.
+} \\
+{\bf RESPONSE:} Thank you for pointing this out. We have added a new subsection ``Visualization", extended the notation for the distribution of quantiles and also added a reference to the literature.
+
+\item  Some sentences:\\
+{\it 
+May change ``chapter(s)" to ``section(s)" for consistence.
+} \\
+{\bf RESPONSE:} Thank you for spotting this. We have unified the wording and now only ``chapter(s)" is used.
+
+\item Section Introduction:\\
+{\it   
+It will be good to see a summary table listing what default operations or functions
+are already implemented or allowed in \pkg{mistr}. For example, I was trying to see some
+transformations such as if $1/X$, $sqrt(X)$, or $\log(X)$ for a normal distributed $X$ be
+possibly done by \pkg{mistr}. The table can be on-line or external.
+} \\
+{\bf RESPONSE:} Even though it would be great to include such a table, this is unfortunately not possible. If a transformation is allowed or not, is generally decided by \pkg{mistr} in a dynamic way and for the majority of distributions this depends on the specified parameters. However, a general rule of thumb is that if the transformation is monotone on the support of the distribution (which can be returned using \code{sudo\_support()}), the transformation will be processed, since this is the way how the code makes the decision. We have changed the ``Adding transformation" section so that the above mentioned rule of thumb is there clearly written.
+
+\item  Section Summary:\\
+{\it   
+Please discuss more about the extension if ``non-monotonic" transformations be possible in \pkg{mistr}, or what operations or functions may be needed if one wants to implement
+them based on \pkg{mistr}.
+} \\
+{\bf RESPONSE:} Currently, the ``non-monotonic" transformations are unfortunately not possible using the framework provided by \pkg{mistr}, as the package in its implementation requires the inverse transformation to exist. The allowance of  ``non-monotonic" transformations would require much more numerical procedures (compared to almost none that are required now) and could possibly result in numerical instabilities. We have changed the Summary paragraph, so that now it emphasizes that only monotonic transformations can be included. Thank you for spotting this.   
+
+\end{enumerate}
+
+
+\end{document}

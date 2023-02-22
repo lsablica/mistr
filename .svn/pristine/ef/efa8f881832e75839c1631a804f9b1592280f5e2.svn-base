@@ -1,0 +1,1766 @@
+#' @title Probability mass points
+#' @description Function returns a vector of points where a mass of probability is present.
+#'              These points are then used in \code{\link{plot}} and \code{\link{plotgg}} calls.
+#' @param O distribution object.
+#' @param interval interval in which the support of discrete elements should be found.
+#' @return Vector of values.
+#' @note The function is designed in a way that it rather returns more than less. Thus it might
+#'      return a value that is close to the interval but not in. This is for use of the package not a problem as
+#'      jumps is internally used only in plots and quantile function of a mixture distribution where an
+#'      additional value can not influence the output.
+#' @rdname jumps
+#' @examples
+#' B <- binomdist(12, 0.4)
+#' P <- poisdist(2)
+#'
+#' I <- c(-7, 16.8)
+#' jumps(B, I)
+#' jumps(P, I)
+#' @export
+jumps <- function(O, interval) UseMethod("jumps")
+#' @rdname jumps
+#' @export
+jumps.discrdist <- function(O, interval) {
+  interval <- sort(interval)
+  if (sudo_support(O)["To"] < interval[1] || sudo_support(O)["From"] > interval[2])
+    return(NULL)
+  interval <- c(max(sudo_support(O)["From"], interval[1]), min(sudo_support(O)["To"], interval[2]))
+  g <- c((round((interval[1] - O$support$from), 14)%/%O$support$by) * O$support$by + O$support$from, (round((interval[2] -
+                                                                                                               O$support$from), 14)%/%O$support$by + 1) * O$support$by + O$support$from)
+  v <- seq.int(max(g[1], O$support$from), min(g[2], O$support$to), by = O$support$by)
+  v <- v[v <= interval[2] & v >= interval[1]]
+  sort(v)
+}
+#' @rdname jumps
+#' @export
+jumps.trans_discrdist <- function(O, interval) {
+  interval <- sort(interval)
+  if (sudo_support(O)["To"] < interval[1] || sudo_support(O)["From"] > interval[2])
+    return(NULL)
+  interval <- c(max(sudo_support(O)["From"], interval[1]), min(sudo_support(O)["To"], interval[2]))
+  h <- sort(eval(O$trafo$invtrans, list(X = interval))) + c(-1e-06, 1e-06)
+  v <- jumps(untrafo(O), h)
+  if (is.null(v))
+    return(NULL)
+  v <- eval(O$trafo$trans, list(X = v))
+  v <- v[v <= interval[2] + 1e-06 & v >= interval[1] - 1e-06]
+  sort(v)
+}
+#' @rdname jumps
+#' @export
+jumps.contdist <- function(O, interval) {
+  NULL
+}
+#' @rdname jumps
+#' @export
+jumps.trans_contdist <- function(O, interval) {
+  NULL
+}
+#' @rdname jumps
+#' @export
+jumps.mixdist <- function(O, interval) {
+  suppressWarnings(sort(unique(unlist(lapply(O$objects, function(x) jumps(x, interval))))))
+}
+#' @rdname jumps
+#' @export
+jumps.trans_mixdist <- function(O, interval) {
+  interval <- sort(interval)
+  interval <- c(max(sudo_support(O)["From"], interval[1]), min(sudo_support(O)["To"], interval[2]))
+  h <- sort(eval(O$trafo$invtrans, list(X = interval))) + c(-1e-06, 1e-06)
+  v <- jumps(untrafo(O), h)
+  if (is.null(v))
+    return(NULL)
+  v <- eval(O$trafo$trans, list(X = v))
+  v <- v[v <= interval[2] + 1e-06 & v >= interval[1] - 1e-06]
+  sort(v)
+}
+#' @rdname jumps
+#' @export
+jumps.compdist <- function(O, interval) {
+  l <- logical(length(O$objects))
+  interval <- sort(interval)
+  in_interval <- O$breakpoints > interval[1] & O$breakpoints < interval[2]
+  w <- c(interval[1], O$breakpoints[in_interval], interval[2])
+  l[-length(l)] <- in_interval
+  if (all(!l))
+    l[findInterval(mean(interval), O$breakpoints) + 1] <- TRUE else l[max(which(in_interval)) + 1] <- TRUE
+  obj <- O$objects[l]
+  v <- suppressWarnings(unique(unlist(mapply(function(x, y, z) jumps(x, c(y, z)), obj, w[-1], w[-length(w)]))))
+  v <- v[v <= interval[2] + 1e-06 & v >= interval[1] - 1e-06]
+  v
+}
+#' @rdname jumps
+#' @export
+jumps.trans_compdist <- function(O, interval) {
+  interval <- sort(interval)
+  interval <- c(max(sudo_support(O)["From"], interval[1]), min(sudo_support(O)["To"], interval[2]))
+  v <- jumps(untrafo(O), sort(eval(O$trafo$invtrans, list(X = interval))) + c(-1e-06, 1e-06))
+  if (is.null(v))
+    return(NULL)
+  v <- eval(O$trafo$trans, list(X = v))
+  v <- v[v <= interval[2] + 1e-06 & v >= interval[1] - 1e-06]
+  v
+}
+
+
+
+#' @title Autoplot of Distributions
+#' @description The functions plot the CDF and PDF of a given distribution object.
+#' @param x distribution object.
+#' @param which whether to plot only CDF, PDF or both, default: 'all'.
+#' @param only_mix whether to plot only mixture/composite model and not also the components, default: FALSE.
+#' @param pp1 number of points at which CDF is evaluated, default: 1000.
+#' @param pp2 number of points at which PDF is evaluated, default: 1000.
+#' @param col color used in plot, default: '#122e94'.
+#' @param xlim1 xlim of CDF plot, default: q(x, c(0.01, 0.99)).
+#' @param ylim1 ylim of CDF plot, default: NULL.
+#' @param xlim2 xlim of PDF plot, default: xlim1.
+#' @param ylim2 ylim of PDF plot, default: NULL.
+#' @param xlab1 xlab of CDF plot, default: 'x'.
+#' @param ylab1 ylab of CDF plot, default: 'P(X <U+2264> x)'.
+#' @param xlab2 xlab of PDF plot, default: 'x'.
+#' @param ylab2 ylab of PDF plot, default: 'P(X = x)'.
+#' @param main1 title of CDF plot, default: 'CDF'.
+#' @param main2 title of PDF plot, default: 'PDF'/'PMF'.
+#' @param type1 type of CDF plot.
+#' @param type2 type of PDF plot.
+#' @param lty1 lty used in CDF plot.
+#' @param lty2 lty used in PDF plot.
+#' @param lwd1 lwd used in CDF plot.
+#' @param lwd2 lwd used in PDF plot.
+#' @param lty_abline lty of abline if ablines are part of plot (composite and discrete distributions).
+#' @param mtext_cex cex parameter for mtexts used in the plots of composite distributions, default: 1.
+#' @param ... further arguments to be passed.
+#' @examples
+#' N <- normdist()
+#' plot(N)
+#'
+#' # manipulating cdf plot
+#' B <- binomdist(12, 0.5)
+#' plot(-3*B, which = "cdf", xlim1 = c(-30, -10))
+#' # manipulating pdf plot
+#' plot(-3*B, which = "pdf", xlim1 = c(-30, -10))
+#' @rdname plot
+#' @name Distribution_autoplot
+#' @importFrom grDevices rainbow
+NULL
+
+#' @rdname plot
+#' @usage \method{plot}{compdist}(x, which = "all", only_mix = FALSE, pp1 = 1000, pp2 = 1000, col = "#122e94",
+#'         xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL,
+#'         xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)",
+#'         main1 = "CDF", main2 = "PDF", type1 = "l", type2 = "l",
+#'         lty1 = 1, lty2 = 1, lwd1 = 2, lwd2 = 2, lty_abline = 3, mtext_cex = 1, ...)
+#' @export
+plot.compdist <- function(x, which = "all", only_mix = FALSE, pp1 = 1000, pp2 = 1000, col = "#122e94",
+                          xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL,
+                          xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)", main1 = "CDF", main2 = "PDF",
+                          type1 = "l", type2 = "l", lty1 = 1, lty2 = 1, lwd1 = 2, lwd2 = 2, lty_abline = 3, mtext_cex = 1, ...) {
+  if (any(is.infinite(xlim1)))
+    stop("please select xlim")
+  g <- x$weights
+  l <- length(x$objects)
+  x$breakpoints <- sort(x$breakpoints)
+  if (l == 1)
+    only_mix = TRUE
+  h <- rainbow(l)
+  br <- unique(x$breakpoints)
+  g2 <- paste0(round(cumsum(g[-length(g)]) * 100, 2), "%")
+  dubl <- duplicated(x$breakpoints) | duplicated(x$breakpoints, fromLast = TRUE)
+  g22 <- numeric(length(br))
+  g22[table(x$breakpoints) == 1] <- g2[!dubl]
+  g22[table(x$breakpoints) == 2] <- paste(g2[dubl][c(T, F)], g2[dubl][c(F, T)], sep = "-")
+  if (tolower(which) == "cdf") {
+    t <- sort(unique(c(seq.int(xlim1[1], xlim1[2], length.out = pp1), jumps(x, xlim1))))
+    val = p(x, t)
+    if (only_mix) {
+      plot(t, val, col = col, xlim = xlim1, ylim = ylim1, type = type1, lty = lty1, lwd = lwd1, xlab = xlab1, ylab = ylab1,
+           main = main1, ...)
+    } else {
+      int <- findInterval2(t, x$breakpoints, x$interval) + 1
+      plot(t, val, type = "l", xlim = xlim1, ylim = ylim1, lty = lty1, lwd = lwd1, xlab = xlab1, ylab = ylab1, main = main1,
+           ...)
+      for (i in 1:l) {
+        lines(t[int == i], val[int == i], col = h[i], lwd = lwd1, lty = lty1)
+      }
+      in_break <- br > xlim1[1] & br < xlim1[2]
+      if (any(in_break)) {
+        for (i in seq_along(x$interval)[in_break]) {
+          ln <- sum(int==i)
+          segments(x0 = t[int == i][ln], x1 = t[int == i + 1][1], y0 = val[int == i][ln],
+                   y1 = val[int == i + 1][1], col = ifelse(x$interval[i] == "L", h[i], h[i + 1]), lwd = lwd1, lty = lty1)
+        }
+        abline(v = br[in_break], col = "tomato3", lwd = lwd1, lty = lty_abline)
+        mtext(g22[in_break], side = 1, line = 0.3, col = "tomato3", at = br[in_break], cex = mtext_cex)
+      }
+    }
+  } else if (tolower(which) == "pdf") {
+    t <- sort(unique(c(seq.int(xlim2[1], xlim2[2], length.out = pp2), jumps(x, xlim2))))
+    val = c(d(x, t), rep.int(0, sum(duplicated(x$breakpoints))))
+    t <- c(t, x$breakpoints[duplicated(x$breakpoints)])
+    if (only_mix) {
+      plot(t, val, col = col, xlim = xlim2, ylim = ylim2, type = type2, lty = lty2, lwd = lwd2, xlab = xlab2, ylab = ylab2,
+           main = main2, ...)
+    } else {
+      int <- findInterval2(t, x$breakpoints, x$interval) + 1
+      plot(t, val, type = "n", xlim = xlim2, ylim = ylim2, xlab = xlab2, ylab = ylab2, main = main2, ...)
+      for (i in 1:l) {
+        lines(t[int == i], val[int == i], col = h[i], lty = lty2, lwd = lwd2)
+      }
+      in_break <- br > xlim2[1] & br < xlim2[2]
+      if (any(in_break)) {
+        abline(v = br[in_break], col = "tomato3", lwd = lwd2, lty = lty_abline)
+        mtext(g22[in_break], side = 1, line = 0.3, col = "tomato3", at = br[in_break], cex = mtext_cex)
+      }
+    }
+  } else {
+    input <- match.call()
+    input[[1]] <- as.name("plot")
+    old.par <- par(mfrow = c(1, 2))
+    on.exit(par(old.par))
+    input$which <- "cdf"
+    eval.parent(input)
+    input$which <- "pdf"
+    eval.parent(input)
+  }
+  invisible(x)
+}
+#' @rdname plot
+#' @usage \method{plot}{trans_compdist}(x, which = "all", only_mix = FALSE, pp1 = 1000, pp2 = 1000, col = "#122e94",
+#'         xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL,
+#'         xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)",
+#'         main1 = "CDF", main2 = "PDF", type1 = "l", type2 = "l",
+#'         lty1 = 1, lty2 = 1, lwd1 = 2, lwd2 = 2, lty_abline = 3, mtext_cex = 1, ...)
+#' @export
+plot.trans_compdist <- function(x, which = "all", only_mix = FALSE, pp1 = 1000, pp2 = 1000, col = "#122e94",
+                                xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL,
+                                xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)", main1 = "CDF", main2 = "PDF",
+                                type1 = "l", type2 = "l", lty1 = 1, lty2 = 1, lwd1 = 2, lwd2 = 2, lty_abline = 3, mtext_cex = 1, ...) {
+  if (any(is.infinite(xlim1)))
+    stop("please select xlim")
+  if (monot(x) == 1) {
+    spec <- x$interval
+    g <- x$weights
+    dif <- x$trunc$diff
+  } else {
+    spec <- sapply(rev(x$interval), function(x) if (x == "L")
+      "R" else "L")
+    dif <- rev(x$trunc$diff)
+    g <- rev(x$weights)
+  }
+  breakp <- sort(eval(x$trafo$trans, list(X = x$breakpoints)))
+  l <- length(x$objects)
+  h <- rainbow(l)
+  br <- unique(breakp)
+  g2 <- paste0(round(cumsum(g[-length(g)]) * 100, 2), "%")
+  dubl <- duplicated(breakp) | duplicated(breakp, fromLast = TRUE)
+  g22 <- numeric(length(br))
+  g22[table(breakp) == 1] <- g2[!dubl]
+  g22[table(breakp) == 2] <- paste(g2[dubl][c(T, F)], g2[dubl][c(F, T)], sep = "-")
+  if (tolower(which) == "cdf") {
+    t <- sort(unique(c(seq.int(xlim1[1], xlim1[2], length.out = pp1), jumps(x, xlim1))))
+    val = p(x, t)
+    if (only_mix) {
+      plot(t, val, col = col, xlim = xlim1, ylim = ylim1, type = type1, lty = lty1, lwd = lwd1, xlab = xlab1, ylab = ylab1,
+           main = main1, ...)
+    } else {
+      int <- findInterval2(t, breakp, spec) + 1
+      plot(t, val, type = "l", xlim = xlim1, ylim = ylim1, lty = lty1, lwd = lwd1, xlab = xlab1, ylab = ylab1, main = main1,
+           ...)
+      for (i in 1:l) {
+        lines(t[int == i], val[int == i], col = h[i], lwd = lwd1, lty = lty1)
+      }
+      in_break <- br > xlim1[1] & br < xlim1[2]
+      if (any(in_break)) {
+        for (i in seq_along(x$interval)[in_break]) {
+          ln <- ln <- sum(int==i)
+          segments(x0 = t[int == i][ln], x1 = t[int == i + 1][1], y0 = val[int == i][ln],
+                   y1 = val[int == i + 1][1], col = ifelse(spec[i] == "L", h[i], h[i + 1]), lwd = lwd1, lty = lty1)
+        }
+        abline(v = br[in_break], col = "tomato3", lwd = lwd1, lty = lty_abline)
+        mtext(g22[in_break], side = 1, line = 0.3, col = "tomato3", at = br[in_break], cex = mtext_cex)
+      }
+    }
+  } else if (tolower(which) == "pdf") {
+    t <- sort(unique(c(seq.int(xlim2[1], xlim2[2], length.out = pp2), jumps(x, xlim2))))
+    val = c(d(x, t), rep.int(0, sum(duplicated(x$breakpoints))))
+    t <- c(t, breakp[duplicated(breakp)])
+    if (only_mix) {
+      plot(t, val, col = col, xlim = xlim2, ylim = ylim2, type = type2, lty = lty2, lwd = lwd2, xlab = xlab2, ylab = ylab2,
+           main = main2, ...)
+    } else {
+      int <- findInterval2(t, breakp, spec) + 1
+      plot(t, val, type = "n", xlim = xlim2, ylim = ylim2, xlab = xlab2, ylab = ylab2, main = main2, ...)
+      for (i in 1:l) {
+        lines(t[int == i], val[int == i], col = h[i], lty = lty2, lwd = lwd2)
+      }
+      in_break <- br > xlim2[1] & br < xlim2[2]
+      if (any(in_break)) {
+        abline(v = br[in_break], col = "tomato3", lwd = lwd2, lty = lty_abline)
+        mtext(g22[in_break], side = 1, line = 0.3, col = "tomato3", at = br[in_break], cex = mtext_cex)
+      }
+    }
+  } else {
+    input <- match.call()
+    input[[1]] <- as.name("plot")
+    old.par <- par(mfrow = c(1, 2))
+    on.exit(par(old.par))
+    input$which <- "cdf"
+    eval.parent(input)
+    input$which <- "pdf"
+    eval.parent(input)
+  }
+  invisible(x)
+}
+
+
+#' @rdname plot
+#' @usage \method{plot}{contdist}(x, which = "all", pp1 = 1000, pp2 = 1000, col = "#122e94",
+#'         xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL,
+#'         xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)",
+#'         main1 = "CDF", main2 = "PDF", type1 = "l", type2 = "l",
+#'         lty1 = NULL, lty2 = NULL, lwd1 = NULL, lwd2 = NULL, ...)
+#' @export
+plot.contdist <- function(x, which = "all", pp1 = 1000, pp2 = 1000, col = "#122e94", xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL,
+                          xlim2 = xlim1, ylim2 = NULL, xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)", main1 = "CDF", main2 = "PDF",
+                          type1 = "l", type2 = "l", lty1 = NULL, lty2 = NULL, lwd1 = NULL, lwd2 = NULL, ...) {
+  if (any(is.infinite(xlim1)))
+    stop("please select xlim1")
+  if (tolower(which) == "cdf") {
+    t <- seq.int(from = xlim1[1], to = xlim1[2], length.out = pp1)
+    plot(t, p(x, t), type = type1, col = col, xlim = xlim1, ylim = ylim1, xlab = xlab1, ylab = ylab1, main = main1, lty = lty1,
+         lwd = lwd1, ...)
+  } else if (tolower(which) == "pdf") {
+    tt <- seq.int(xlim2[1], xlim2[2], length.out = pp2)
+    plot(tt, d(x, tt), type = type2, col = col, xlim = xlim2, ylim = ylim2, xlab = xlab2, ylab = ylab2, main = main2,
+         lty = lty2, lwd = lwd2, ...)
+  } else {
+    input <- match.call()
+    input[[1]] <- as.name("plot")
+    old.par <- par(mfrow = c(1, 2))
+    on.exit(par(old.par))
+    input$which <- "cdf"
+    eval.parent(input)
+    input$which <- "pdf"
+    eval.parent(input)
+  }
+  invisible(x)
+}
+#' @rdname plot
+#' @usage \method{plot}{trans_contdist}(x, which = "all", pp1 = 1000, pp2 = 1000, col = "#122e94",
+#'         xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL,
+#'         xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)",
+#'         main1 = "CDF", main2 = "PDF", type1 = "l", type2 = "l",
+#'         lty1 = NULL, lty2 = NULL, lwd1 = NULL, lwd2 = NULL, ...)
+#' @export
+plot.trans_contdist <- function(x, which = "all", pp1 = 1000, pp2 = 1000, col = "#122e94", xlim1 = q(x, c(0.01, 0.99)),
+                                ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL, xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)", main1 = "CDF",
+                                main2 = "PDF", type1 = "l", type2 = "l", lty1 = NULL, lty2 = NULL, lwd1 = NULL, lwd2 = NULL, ...) {
+  if (any(is.infinite(xlim1)))
+    stop("please select xlim1")
+  if (tolower(which) == "cdf") {
+    t <- seq.int(from = xlim1[1], to = xlim1[2], length.out = pp1)
+    plot(t, p(x, t), type = type1, col = col, xlim = xlim1, ylim = ylim1, xlab = xlab1, ylab = ylab1, main = main1, lty = lty1,
+         lwd = lwd1, ...)
+  } else if (tolower(which) == "pdf") {
+    tt <- seq.int(xlim2[1], xlim2[2], length.out = pp2)
+    plot(tt, d(x, tt), type = type2, col = col, xlim = xlim2, ylim = ylim2, xlab = xlab2, ylab = ylab2, main = main2,
+         lty = lty2, lwd = lwd2, ...)
+  } else {
+    input <- match.call()
+    input[[1]] <- as.name("plot")
+    old.par <- par(mfrow = c(1, 2))
+    on.exit(par(old.par))
+    input$which <- "cdf"
+    eval.parent(input)
+    input$which <- "pdf"
+    eval.parent(input)
+  }
+  invisible(x)
+}
+#' @rdname plot
+#' @usage \method{plot}{discrdist}(x, which = "all", col = "#122e94",
+#'         xlim1 = q(x,c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL,
+#'         xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)",
+#'         main1 = "CDF", main2 = "PMF", type1 = NULL, type2 = NULL,
+#'         lty1 = NULL, lty2 = NULL, lwd1 = NULL, lwd2 = NULL, ...)
+#' @export
+plot.discrdist <- function(x, which = "all", col = "#122e94", xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL,
+                           xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)", main1 = "CDF", main2 = "PMF", type1 = NULL, type2 = NULL,
+                           lty1 = NULL, lty2 = NULL, lwd1 = NULL, lwd2 = NULL, ...) {
+  if (any(is.infinite(xlim1)))
+    stop("please select xlim")
+  if (tolower(which) == "cdf") {
+    t <- jumps(x, xlim1)
+    V <- p(x, t)
+    m <- length(t)
+    plot(t, V, pch = 16, type = "p", col = col, xlim = xlim1, ylim = ylim1, xlab = xlab1, ylab = ylab1, main = main1,
+         lty = lty1, lwd = lwd1, ...)
+    points(t[-1], V[-m])
+    segments(t[-m], V[-m], x1 = t[-1], y1 = V[-m])
+  } else if (tolower(which) == "pdf") {
+    t <- jumps(x, xlim2)
+    V <- d(x, t)
+    plot(t, V, pch = 16, type = "p", col = col, xlim = xlim2, ylim = ylim2, xlab = xlab2, ylab = ylab2, main = main2,
+         lty = lty2, lwd = lwd2, ...)
+    segments(t, 0, x1 = t, y1 = V)
+  } else {
+    input <- match.call()
+    input[[1]] <- as.name("plot")
+    old.par <- par(mfrow = c(1, 2))
+    on.exit(par(old.par))
+    input$which <- "cdf"
+    eval.parent(input)
+    input$which <- "pdf"
+    eval.parent(input)
+  }
+  invisible(x)
+}
+#' @rdname plot
+#' @usage \method{plot}{trans_discrdist}(x, which = "all", col = "#122e94",
+#'         xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL,
+#'         xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)",
+#'         main1 = "CDF", main2 = "PMF", type1 = "p", type2 = "p",
+#'         lty1 = NULL, lty2 = NULL, lwd1 = NULL, lwd2 = NULL, ...)
+#' @export
+plot.trans_discrdist <- function(x, which = "all", col = "#122e94", xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1,
+                                 ylim2 = NULL, xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)", main1 = "CDF", main2 = "PMF", type1 = "p",
+                                 type2 = "p", lty1 = NULL, lty2 = NULL, lwd1 = NULL, lwd2 = NULL, ...) {
+  if (any(is.infinite(xlim1)))
+    stop("please select xlim")
+  if (tolower(which) == "cdf") {
+    t <- jumps(x, xlim1)
+    V <- p(x, t)
+    m <- length(t)
+    plot(t, V, pch = 16, type = type1, col = col, xlim = xlim1, ylim = ylim1, xlab = xlab1, ylab = ylab1, main = main1,
+         lty = lty1, lwd = lwd1, ...)
+    points(t[-1], V[-m])
+    segments(t[-m], V[-m], x1 = t[-1], y1 = V[-m])
+  } else if (tolower(which) == "pdf") {
+    t <- jumps(x, xlim2)
+    V <- d(x, t)
+    plot(t, V, pch = 16, type = type1, col = col, xlim = xlim2, ylim = ylim2, xlab = xlab2, ylab = ylab2, main = main2,
+         lty = lty2, lwd = lwd2, ...)
+    segments(t, 0, x1 = t, y1 = V)
+  } else {
+    input <- match.call()
+    input[[1]] <- as.name("plot")
+    old.par <- par(mfrow = c(1, 2))
+    on.exit(par(old.par))
+    input$which <- "cdf"
+    eval.parent(input)
+    input$which <- "pdf"
+    eval.parent(input)
+  }
+  invisible(x)
+}
+
+
+
+#' @rdname plot
+#' @usage \method{plot}{contmixdist}(x, which = "all", only_mix = FALSE, pp1 = 1000, pp2 = 1000, col = "#122e94",
+#'         xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL,
+#'         xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)",
+#'         main1 = "CDF", main2 = "PDF", type1 = "l", type2 = "l",
+#'         lty1 = 3, lty2 = 3, lwd1 = 2, lwd2 = 2, ...)
+#' @export
+plot.contmixdist <- function(x, which = "all", only_mix = FALSE, pp1 = 1000, pp2 = 1000, col = "#122e94",
+                             xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL,
+                             xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)", main1 = "CDF", main2 = "PDF",
+                             type1 = "l", type2 = "l", lty1 = 3, lty2 = 3, lwd1 = 2, lwd2 = 2, ...) {
+  if (any(is.infinite(xlim1)))
+    stop("please select xlim")
+  g <- x$weights
+  l <- length(x$objects)
+  h <- rainbow(l)
+  if (tolower(which) == "cdf") {
+    t <- seq.int(xlim1[1], xlim1[2], length.out = pp1)
+    if (only_mix) {
+      plot(t, p(x, t), xlim = xlim1, ylim = ylim1, col = col, type = type1, lty = lty1, lwd = lwd1, xlab = xlab1, ylab = ylab1,
+           main = main1, ...)
+    } else {
+      plot(t, p(x, t), xlim = xlim1, ylim = ylim1, type = "n", lty = lty1, lwd = lwd1, xlab = xlab1, ylab = ylab1,
+           main = main1, ...)
+      z = numeric(pp1)
+      for (i in 1:l) {
+        z <- g[i] * p(x$objects[[i]], t) + z
+        lines(t, z, col = h[i], lwd = lwd1)
+      }
+      lines(t, p(x, t), lty = lty1, lwd = lwd1)
+    }
+  } else if (tolower(which) == "pdf") {
+    t <- seq.int(xlim2[1], xlim2[2], length.out = pp2)
+    if (only_mix) {
+      plot(t, d(x, t), xlim = xlim2, ylim = ylim2, col = col, type = type2, lty = lty2, lwd = lwd2, xlab = xlab2, ylab = ylab2,
+           main = main2, ...)
+    } else {
+      plot(t, d(x, t), xlim = xlim2, type = "n", lty = lty2, lwd = lwd2, xlab = xlab2, ylab = ylab2, main = main2,
+           ...)
+      for (i in 1:l) {
+        lines(t, g[i] * d(x$objects[[i]], t), col = h[i], lwd = lwd2)
+      }
+      lines(t, d(x, t), lty = lty2, lwd = lwd2)
+    }
+  } else {
+    input <- match.call()
+    input[[1]] <- as.name("plot")
+    old.par <- par(mfrow = c(1, 2))
+    on.exit(par(old.par))
+    input$which <- "cdf"
+    eval.parent(input)
+    input$which <- "pdf"
+    eval.parent(input)
+  }
+  invisible(x)
+}
+#' @rdname plot
+#' @usage \method{plot}{trans_contmixdist}(x, which = "all", only_mix = FALSE, pp1 = 1000, pp2 = 1000, col = "#122e94",
+#'         xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL,
+#'         xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)",
+#'         main1 = "CDF", main2 = "PDF", type1 = "l", type2 = "l",
+#'         lty1 = 3, lty2 = 3, lwd1 = 2, lwd2 = 2, ...)
+#' @export
+plot.trans_contmixdist <- function(x, which = "all", only_mix = FALSE, pp1 = 1000, pp2 = 1000, col = "#122e94",
+                                   xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL,
+                                   xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)", main1 = "CDF", main2 = "PDF",
+                                   type1 = "l", type2 = "l", lty1 = 3, lty2 = 3, lwd1 = 2, lwd2 = 2, ...) {
+  if (any(is.infinite(xlim1)))
+    stop("please select xlim")
+  g <- x$weights
+  l <- length(x$objects)
+  h <- rainbow(l)
+  if (tolower(which) == "cdf") {
+    t <- seq.int(xlim1[1], xlim1[2], length.out = pp1)
+    if (only_mix) {
+      plot(t, p(x, t), xlim = xlim1, ylim = ylim1, col = col, type = type1, lty = lty1, lwd = lwd1, xlab = xlab1, ylab = ylab1,
+           main = main1, ...)
+    } else {
+      plot(t, p(x, t), xlim = xlim1, ylim = ylim1, col = col, type = "n", lty = lty1, lwd = lwd1, xlab = xlab1, ylab = ylab1,
+           main = main1, ...)
+      z = numeric(pp1)
+      for (i in 1:l) {
+        z <- g[i] * p(eval(x$trafo$print, list(X = x$objects[[i]])), t) + z
+        lines(t, z, col = h[i], lwd = lwd1)
+      }
+      lines(t, p(x, t), lty = lty1, lwd = lwd1)
+    }
+  } else if (tolower(which) == "pdf") {
+    t <- seq.int(xlim2[1], xlim2[2], length.out = pp2)
+    if (only_mix) {
+      plot(t, d(x, t), xlim = xlim2, ylim = ylim2, type = type2, lty = lty2, lwd = lwd2, xlab = xlab2, ylab = ylab2,
+           main = main2, ...)
+    } else {
+      plot(t, d(x, t), xlim = xlim2, ylim = ylim2, type = "n", lty = lty2, lwd = lwd2, xlab = xlab2, ylab = ylab2,
+           main = main2, ...)
+      for (i in 1:l) {
+        lines(t, g[i] * d(eval(x$trafo$print, list(X = x$objects[[i]])), t), col = h[i], lwd = lwd2)
+      }
+      lines(t, d(x, t), lty = lty2, lwd = lwd2)
+    }
+  } else {
+    input <- match.call()
+    input[[1]] <- as.name("plot")
+    old.par <- par(mfrow = c(1, 2))
+    on.exit(par(old.par))
+    input$which <- "cdf"
+    eval.parent(input)
+    input$which <- "pdf"
+    eval.parent(input)
+  }
+  invisible(x)
+}
+
+#' @rdname plot
+#' @usage \method{plot}{discrmixdist}(x, which = "all", only_mix = FALSE,
+#'         pp1 = 1000, pp2 = 2 * (diff(xlim2)), col = "#122e94",
+#'         xlim1 = q(x,c(0.01, 0.99)), ylim1 = c(0, 1), xlim2 = xlim1, ylim2 = NULL,
+#'         xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)",
+#'         main1 = "CDF", main2 = "PMF", type1 = "l", type2 = "l",
+#'         lty1 = 3, lty2 = 3, lwd1 = 3, lwd2 = 3, ...)
+#' @export
+plot.discrmixdist <- function(x, which = "all", only_mix = FALSE, pp1 = 1000, pp2 = 2 * (diff(xlim2)), col = "#122e94",
+                              xlim1 = q(x, c(0.01, 0.99)), ylim1 = c(0, 1), xlim2 = xlim1, ylim2 = NULL,
+                              xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)",main1 = "CDF", main2 = "PMF",
+                              type1 = "l", type2 = "l", lty1 = 3, lty2 = 3, lwd1 = 3, lwd2 = 3, ...) {
+  if (any(is.infinite(xlim1)))
+    stop("please select xlim")
+  g <- x$weights
+  l <- length(x$objects)
+  h <- rainbow(l)
+  if (tolower(which) == "cdf") {
+    t <- unique(sort(c(seq.int(xlim1[1] - 0.1, xlim1[2] + 0.1, length.out = pp1), jumps(x, xlim1))))
+    if (only_mix) {
+      plot(t, p(x, t), col = col, xlim = xlim1, ylim = ylim1, type = type1, lty = lty1, lwd = lwd1, xlab = xlab1, ylab = ylab1,
+           main = main1, ...)
+    } else {
+      l2 <- mapply(function(x, y) y * p(x, t), x$objects, g)
+      l3 <- rowSums(l2)
+      plot(t, l3, xlim = xlim1, ylim = ylim1, type = "n", lty = lty1, lwd = lwd1, xlab = xlab1, ylab = ylab1, main = main1,
+           ...)
+      l2 <- t(apply(l2, 1, cumsum))
+      for (i in 1:l) {
+        lines(t, l2[, i], col = h[i], lwd = lwd1)
+      }
+      lines(t, l3, lty = lty1, lwd = lwd1)
+    }
+  } else if (tolower(which) == "pdf") {
+    j <- jumps(x, xlim2)
+    names(j) <- round(j, 2)
+    t <- c(j, seq.int(xlim2[1] - 0.1, xlim2[2] + 0.1, length.out = pp2))
+    t <- sort(t[!duplicated(t)])
+    l2 <- t(mapply(function(x, y) y * d(x, t), x$objects, g))
+    colnames(l2) <- names(t)
+    l3 <- colSums(l2)
+    if (only_mix) {
+      barplot(l3, col = col, main = main2, xlab = xlab2, ylab = ylab2, ylim = ylim2, las = 2)
+    } else {
+      barplot(l2, col = h, main = main2, xlab = xlab2, ylab = ylab2, ylim = ylim2, las = 2)
+    }
+  } else {
+    input <- match.call()
+    input[[1]] <- as.name("plot")
+    old.par <- par(mfrow = c(1, 2))
+    on.exit(par(old.par))
+    input$which <- "cdf"
+    eval.parent(input)
+    input$which <- "pdf"
+    eval.parent(input)
+  }
+  invisible(x)
+}
+#' @rdname plot
+#' @usage \method{plot}{trans_discrmixdist}(x, which = "all", only_mix = FALSE,
+#'         pp1 = 1000, pp2 = 2 * (diff(xlim2)), col = "#122e94",
+#'         xlim1 = q(x,c(0.01, 0.99)), ylim1 = c(0, 1), xlim2 = xlim1, ylim2 = NULL,
+#'         xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)",
+#'         main1 = "CDF", main2 = "PMF", type1 = "l", type2 = "l",
+#'         lty1 = 3, lty2 = 3, lwd1 = 3, lwd2 = 3, ...)
+#' @export
+plot.trans_discrmixdist <- function(x, which = "all", only_mix = FALSE, pp1 = 1000, pp2 = 2 * (diff(xlim2)), col = "#122e94",
+                                    xlim1 = q(x, c(0.01, 0.99)), ylim1 = c(0, 1), xlim2 = xlim1, ylim2 = NULL,
+                                    xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)", main1 = "CDF", main2 = "PMF",
+                                    type1 = "l", type2 = "l", lty1 = 3, lty2 = 3, lwd1 = 3, lwd2 = 3, ...) {
+  if (any(is.infinite(xlim1)))
+    stop("please select xlim")
+  g <- x$weights
+  l <- length(x$objects)
+  h <- rainbow(l)
+  obj <- lapply(x$objects, function(z) eval(x$trafo$print, list(X = z)))
+  if (tolower(which) == "cdf") {
+    t <- unique(sort(c(seq.int(xlim1[1] - 0.1, xlim1[2] + 0.1, length.out = pp1), jumps(x, xlim1))))
+    if (only_mix) {
+      plot(t, p(x, t), col = col, xlim = xlim1, ylim = ylim1, type = type1, lty = lty1, lwd = lwd1, xlab = xlab1, ylab = ylab1,
+           main = main1, ...)
+    } else {
+      l2 <- mapply(function(x, y) y * p(x, t), obj, g)
+      l3 <- rowSums(l2)
+      plot(t, l3, xlim = xlim1, ylim = ylim1, type = "n", lty = lty1, lwd = lwd1, xlab = xlab1, ylab = ylab1, main = main1,
+           ...)
+      l2 <- t(apply(l2, 1, cumsum))
+      for (i in 1:l) {
+        lines(t, l2[, i], col = h[i], lwd = lwd1)
+      }
+      lines(t, l3, lty = lty1, lwd = lwd1)
+    }
+  } else if (tolower(which) == "pdf") {
+    j <- jumps(x, xlim2)
+    names(j) <- round(j, 2)
+    t <- c(j, seq.int(xlim2[1] - 0.1, xlim2[2] + 0.1, length.out = pp2))
+    t <- sort(t[!duplicated(t)])
+    l2 <- t(mapply(function(x, y) y * d(x, t), obj, g))
+    colnames(l2) <- names(t)
+    l3 <- colSums(l2)
+    if (only_mix) {
+      barplot(l3, col = col, main = main2, xlab = xlab2, ylab = ylab2, ylim = ylim2, las = 2)
+    } else {
+      barplot(l2, col = h, main = main2, xlab = xlab2, ylab = ylab2, ylim = ylim2, las = 2)
+    }
+  } else {
+    input <- match.call()
+    input[[1]] <- as.name("plot")
+    old.par <- par(mfrow = c(1, 2))
+    on.exit(par(old.par))
+    input$which <- "cdf"
+    eval.parent(input)
+    input$which <- "pdf"
+    eval.parent(input)
+  }
+  invisible(x)
+}
+#' @rdname plot
+#' @usage \method{plot}{contdiscrmixdist}(x, which = "all", only_mix = FALSE, pp1 = 1000, pp2 = 1000, col = "#122e94",
+#'         xlim1 = q(x, c(0.01, 0.99)), ylim1 = c(0, 1), xlim2 = xlim1, ylim2 = NULL,
+#'         xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)",
+#'         main1 = "CDF", main2 = "PDF", type1 = "l", type2 = "l",
+#'         lty1 = 3, lty2 = 3, lwd1 = 2, lwd2 = 2, ...)
+#' @export
+plot.contdiscrmixdist <- function(x, which = "all", only_mix = FALSE, pp1 = 1000, pp2 = 1000, col = "#122e94",
+                                  xlim1 = q(x, c(0.01, 0.99)), ylim1 = c(0, 1), xlim2 = xlim1, ylim2 = NULL,
+                                  xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)", main1 = "CDF", main2 = "PDF",
+                                  type1 = "l", type2 = "l", lty1 = 3, lty2 = 3, lwd1 = 2, lwd2 = 2, ...) {
+  if (any(is.infinite(xlim1)))
+    stop("please select xlim")
+  g <- x$weights
+  l <- length(x$objects)
+  h <- rainbow(l)
+  if (tolower(which) == "cdf") {
+    t <- unique(sort(c(seq.int(xlim1[1], xlim1[2], length.out = pp1), jumps(x, xlim1))))
+    if (only_mix) {
+      plot(t, p(x, t), col = col, xlim = xlim1, ylim = ylim1, type = type1, lty = lty1, lwd = lwd1, xlab = xlab1, ylab = ylab1,
+           main = main1, ...)
+    } else {
+      l2 <- mapply(function(x, y) y * p(x, t), x$objects, g)
+      l3 <- rowSums(l2)
+      plot(t, l3, xlim = xlim1, ylim = ylim1, type = "n", lty = lty1, lwd = lwd1, xlab = xlab1, ylab = ylab1, main = main1,
+           ...)
+      l2 <- t(apply(l2, 1, cumsum))
+      for (i in 1:l) {
+        lines(t, l2[, i], col = h[i], lwd = lwd1)
+      }
+      lines(t, l3, lty = lty1, lwd = lwd1)
+    }
+  } else if (tolower(which) == "pdf") {
+    t <- unique(sort(c(seq.int(xlim2[1], xlim2[2], length.out = pp2), jumps(x, xlim2))))
+    l2 <- mapply(function(x, y) y * d(x, t), x$objects, g)
+    l3 <- rowSums(l2)
+    if (only_mix) {
+      plot(t, l3, col = col, xlim = xlim2, ylim = ylim2, type = type2, lty = lty2, lwd = lwd2, xlab = xlab2, ylab = ylab2,
+           main = main2, ...)
+    } else {
+      plot(t, l3, xlim = xlim2, ylim = ylim2, type = "n", lty = lty2, lwd = lwd2, xlab = xlab2, ylab = ylab2, main = main2,
+           ...)
+      for (i in 1:l) {
+        lines(t, l2[, i], col = h[i], lwd = lwd2)
+      }
+      lines(t, l3, lty = lty2, lwd = lwd2)
+    }
+  } else {
+    input <- match.call()
+    input[[1]] <- as.name("plot")
+    old.par <- par(mfrow = c(1, 2))
+    on.exit(par(old.par))
+    input$which <- "cdf"
+    eval.parent(input)
+    input$which <- "pdf"
+    eval.parent(input)
+  }
+  invisible(x)
+}
+#' @rdname plot
+#' @usage \method{plot}{trans_contdiscrmixdist}(x, which = "all", only_mix = FALSE, pp1 = 1000, pp2 = 1000, col = "#122e94",
+#'         xlim1 = q(x, c(0.01, 0.99)), ylim1 = c(0, 1), xlim2 = xlim1, ylim2 = NULL,
+#'         xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)",
+#'         main1 = "CDF", main2 = "PDF", type1 = "l", type2 = "l",
+#'         lty1 = 3, lty2 = 3, lwd1 = 2, lwd2 = 2, ...)
+#' @export
+plot.trans_contdiscrmixdist <- function(x, which = "all", only_mix = FALSE, pp1 = 1000, pp2 = 1000, col = "#122e94",
+                                        xlim1 = q(x, c(0.01, 0.99)), ylim1 = c(0, 1), xlim2 = xlim1, ylim2 = NULL,
+                                        xlab1 = "x", ylab1 = "P(X \u2264 x)", xlab2 = "x", ylab2 = "P(X = x)", main1 = "CDF", main2 = "PDF",
+                                        type1 = "l", type2 = "l", lty1 = 3, lty2 = 3, lwd1 = 2, lwd2 = 2, ...) {
+  if (any(is.infinite(xlim1)))
+    stop("please select xlim")
+  g <- x$weights
+  l <- length(x$objects)
+  h <- rainbow(l)
+  obj <- lapply(x$objects, function(z) eval(x$trafo$print, list(X = z)))
+  if (tolower(which) == "cdf") {
+    t <- unique(sort(c(seq.int(xlim1[1], xlim1[2], length.out = pp1), jumps(x, xlim1))))
+    if (only_mix) {
+      plot(t, p(x, t), col = col, xlim = xlim1, ylim = ylim1, type = type1, lty = lty1, lwd = lwd1, xlab = xlab1, ylab = ylab1,
+           main = main1, ...)
+    } else {
+      l2 <- mapply(function(x, y) y * p(x, t), obj, g)
+      l3 <- rowSums(l2)
+      plot(t, l3, xlim = xlim1, ylim = ylim1, type = "n", lty = lty1, lwd = lwd1, xlab = xlab1, ylab = ylab1, main = main1,
+           ...)
+      l2 <- t(apply(l2, 1, cumsum))
+      for (i in 1:l) {
+        lines(t, l2[, i], col = h[i], lwd = lwd1)
+      }
+      lines(t, l3, lty = lty1, lwd = lwd1)
+    }
+  } else if (tolower(which) == "pdf") {
+    t <- unique(sort(c(seq.int(xlim2[1], xlim2[2], length.out = pp1), jumps(x, xlim2))))
+    l2 <- mapply(function(x, y) y * d(x, t), obj, g)
+    l3 <- rowSums(l2)
+    if (only_mix) {
+      plot(t, l3, col = col, xlim = xlim2, ylim = ylim2, type = type2, lty = lty2, lwd = lwd2, xlab = xlab2, ylab = ylab2,
+           main = main2, ...)
+    } else {
+      plot(t, l3, xlim = xlim2, ylim = ylim2, type = type2, lty = lty2, lwd = lwd2, xlab = xlab2, ylab = ylab2, main = main2,
+           ...)
+      for (i in 1:l) {
+        lines(t, l2[, i], col = h[i], lwd = lwd2)
+      }
+      lines(t, l3, lty = lty2, lwd = lwd2)
+    }
+  } else {
+    input <- match.call()
+    input[[1]] <- as.name("plot")
+    old.par <- par(mfrow = c(1, 2))
+    on.exit(par(old.par))
+    input$which <- "cdf"
+    eval.parent(input)
+    input$which <- "pdf"
+    eval.parent(input)
+  }
+  invisible(x)
+}
+
+
+#' @title Quantile-Quantile Plot
+#' @description QQplot is a generic function that produces QQ plot of two datasets, distribution and dataset or two distributions.
+#' @param d1 distribution object or dataset.
+#' @param d2 distribution object or dataset.
+#' @param line if qqline should be included, default: TRUE.
+#' @param CI if confidence bound should be included.
+#' @param conf confidence level for confidence bound, default: 0.95.
+#' @param n number of points at which quantile functions are evaluated if two distributions are compared, default: 100.
+#' @param col color of points, default: '#122e94'.
+#' @param line_col color of qqline, default: '#f28df9'.
+#' @param CI_col color of confidence bound, default: 'grey80'.
+#' @param xlab xlab, default: deparse(substitute(d1)).
+#' @param ylab ylab, default: deparse(substitute(d2)).
+#' @param main title, default: 'Q-Q plot'.
+#' @param lwd lwd of qqline, default: 2.
+#' @param ... further arguments to be passed.
+#' @details \code{QQplot} is able to compare any combination of dataset and distributions.
+#'
+#'          \code{QQnorm} is a wrapper around \code{QQplot}, where d1 is set to \code{normdist()}.
+#'
+#'          If quantiles of a continuous distribution are compared with a sample, a confidence bound
+#'          for data is offered. This confidence "envelope" is based on the asymptotic results
+#'          of the order statistics. For more details see \url{https://en.wikipedia.org/wiki/Order_statistic}.
+#' @examples
+#' # sample vs sample
+#' QQplot(r(normdist(), 10000), r(tdist(df = 4), 10000))
+#'
+#' # distribution vs sample
+#' QQplot(normdist(), r(tdist(df = 4), 10000))
+#'
+#' # distribution vs distribution
+#' QQplot(normdist(), tdist(df = 4))
+#' @rdname QQplot
+#' @export
+QQplot <- function(d1, d2, line = TRUE, col = "#122e94", line_col = "#f28df9",
+                   xlab = deparse(substitute(d1)), ylab , main = "Q-Q plot", lwd = 2, ...) UseMethod("QQplot")
+#' @rdname QQplot
+#' @export
+QQplot.default <- function(d1, d2, line = TRUE, col = "#122e94", line_col = "#f28df9", xlab = deparse(substitute(d1)), ylab = deparse(substitute(d2)),
+                           main = "Q-Q plot", lwd = 2, ...) {
+  if(is.dist(d2)) return(QQplot.dist(d2, d1, line = line, col = col,line_col = line_col, xlab = ylab,
+                                     ylab = xlab, main = main, lwd = lwd,...))
+  qqplot(d1, d2, col = col, pch = 16, xlab = xlab, ylab = ylab, main = main, ...)
+  if (line) {
+    xh <- quantile(d1, c(0.25, 0.75))
+    yh <- quantile(d2, c(0.25, 0.75))
+    slope <- diff(yh)/diff(xh)
+    intercept <- yh[1L] - slope * xh[1L]
+    abline(intercept, slope, col = line_col, lwd = lwd)
+  }
+  invisible(d1)
+}
+#' @rdname QQplot
+#' @export
+QQplot.dist <- function(d1, d2, line = TRUE, col = "#122e94", line_col = "#f28df9",
+                        xlab = deparse(substitute(d1)), ylab = ylabe, main = "Q-Q plot", lwd = 2, CI = re, conf = 0.95, n = 100, CI_col = "grey80", ...) {
+  ylabe <- deparse(substitute(d2))
+  if (is.dist(d2)) {
+    re <- FALSE
+    P <- ppoints(n)
+    P2 <- ppoints(n)
+    xp <- q(d1, P)
+    xh <- q(d1, c(0.25, 0.75))
+    yp <- q(d2, P2)
+    yh <- q(d2, c(0.25, 0.75))
+  } else {
+    d2 <- as.vector(d2)
+    re <- is.contin(d1)
+    n <- length(d2)
+    P <- ppoints(n)
+    xp <- q(d1, P)
+    xh <- q(d1, c(0.25, 0.75))
+    yp <- sort(d2)
+    yh <- quantile(d2, c(0.25, 0.75))
+  }
+  
+  slope <- diff(yh)/diff(xh)
+  intercept <- yh[1L] - slope * xh[1L]
+  
+  if (CI) {
+    z <- qnorm(0.5 + conf/2)
+    sd <- (slope/d(d1, xp)) * sqrt(P * (1 - P)/n)
+    up <- intercept + slope * xp + z * sd
+    do <- intercept + slope * xp - z * sd
+    plot(xp, yp, type = "n", xlab = xlab, ylab = ylab, main = main, ylim = c(min(do), max(up)))
+    polygon(c(xp, rev(xp)), c(up, rev(do)), col = CI_col, border = NA)
+  } else {
+    plot(xp, yp, type = "n", xlab = xlab, ylab = ylab, main = main)
+  }
+  
+  if (line)
+    abline(intercept, slope, col = line_col, lwd = lwd)
+  
+  points(xp, yp, col = col, pch = 16, ...)
+  
+  invisible(d1)
+}
+#' @rdname QQplot
+#' @export
+QQnorm <- function(d2, xlab = "Standard Normal", ylab = deparse(substitute(d2)), ...) {
+  QQplot.dist(normdist(), d2, xlab = xlab, ylab = ylab, ...)
+}
+#' @title Autoplot of Fitted Distributions
+#' @description The function plots the CDF, PDF and QQ-plot of a fitted distribution object together with the empirical values.
+#' @param x distribution object.
+#' @param which whether to plot only CDF, PDF, qq  or all three, default: 'all'.
+#' @param layout layout of plots, default: matrix(c(1, 2, 1, 3), nrow = 2).
+#' @param empir_color color of empirical data, default: '#122e94'.
+#' @param mtext_cex cex parameter for mtexts used in the plots.
+#' @param ... further arguments to be passed.
+#' @seealso \code{\link{Distribution_autoplot}}
+#' @rdname plot_comp_fit
+#' @export
+plot.comp_fit <- function(x, which = "all", layout = matrix(c(1, 2, 1, 3), nrow = 2), empir_color = "#122e94", mtext_cex = sett, ...) {
+  if (tolower(which) == "qq") {
+    sett = 1 
+    QQplot(x$Distribution, x$data, xlab = "", ylab = "", ...)
+  } else if (tolower(which) == "cdf") {
+    sett = 1
+    plot(x$Distribution, which = "cdf", mtext_cex = mtext_cex, ...)
+    lines(x = environment(ecdf(x$data))$x, y = environment(ecdf(x$data))$y, col = empir_color, lwd = 2, lty = 3)
+  } else if (tolower(which) == "pdf") {
+    sett = 1
+    plot(x$Distribution, which = "pdf", mtext_cex = mtext_cex, ...)
+    lines(x = density(x$data)$x, y = density(x$data)$y, col = empir_color, lwd = 1, lty = 2)
+  } else {
+    sett = 0.83 
+    old.par <- par(no.readonly = TRUE)
+    par(mai = c(0.4, 0.4, 0.2, 0.1))
+    on.exit(par(old.par))
+    layout(layout)
+    QQplot(x$Distribution, x$data, xlab = "", ylab = "")
+    plot(x$Distribution, which = "cdf", mtext_cex = mtext_cex, ...)
+    lines(x = environment(ecdf(x$data))$x, y = environment(ecdf(x$data))$y, col = empir_color, lwd = 3, lty = 3)
+    plot(x$Distribution, which = "pdf", mtext_cex = mtext_cex, ...)
+    lines(x = density(x$data)$x, y = density(x$data)$y, col = empir_color, lwd = 3, lty = 3)
+  }
+  invisible(x)
+}
+
+plot_risk <- function(model, da, size = 1) {
+  a2 <- sapply(da[, 1] * 100, function(z) substitute(VaR[x], list(x = z)))
+  b2 <- sapply(da[, 1] * 100, function(z) substitute(ES[x], list(x = z)))
+  c2 <- if (dim(da)[2] == 4)
+    sapply(da[, 1] * 100, function(z) substitute(Exp[x], list(x = z))) else NULL
+  var_es <- -unlist(da[, -1])
+  value <- d(distribution(model), var_es)
+  plot(model, which = "pdf", xlim2 = c(min(var_es), max(var_es)), ylim2 = c(0, max(value)), xlab2 = "", ylab2 = "")
+  f <- lapply(1:length(c(a2, b2, c2)), function(i) mtext(c(a2, b2, c2)[[i]], side = 1, line = 0.1, col = "#784215", at = var_es[i], cex = size))
+  segments(x0 = var_es, x1 = var_es, y0 = 0, y1 = value, col = "#784215", lty = 4, lwd = 2)
+}
+
+##############################################################################
+##ggplots
+#############################################################################
+#util
+multiplot <- function(..., plotlist = NULL, cols, layout = NULL) {
+  if (!requireNamespace("grid", quietly = TRUE)) {
+    stop("Package grid needed for this function to work. Please install it.",
+         call. = FALSE)
+  }
+  plots <- c(list(...), plotlist)
+  numPlots = length(plots)
+  
+  if (is.null(layout)) {
+    layout <- matrix(seq.int(1, cols * ceiling(numPlots/cols)), ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+  
+  if (numPlots == 1) {
+    print(plots[[1]])
+    
+  } else {
+    grid::grid.newpage()
+    grid::pushViewport(grid::viewport(layout = grid::grid.layout(nrow(layout), ncol(layout))))
+    for (i in 1:numPlots) {
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+      print(plots[[i]], vp = grid::viewport(layout.pos.row = matchidx$row, layout.pos.col = matchidx$col))
+    }
+  }
+}
+
+defaulttheme <- function() {
+  delete_colors <- function(x) {
+    if (any(names(x) == "colour"))
+      x["colour"] <- list(NULL)
+    if (any(names(x) == "fill"))
+      x["fill"] <- list(NULL)
+    x
+  }
+  them <- lapply(ggplot2::theme_grey(), delete_colors)
+  attributes(them) <- attributes(ggplot2::theme_grey())
+  them
+}
+#' @export
+#' @title Mistr Theme for Ggplot
+#' @description Theme for plots that use ggplot2.
+#' @param grey logical, if TRUE grey palette is used, default: FALSE.
+#' @param blue logical, if TRUE blue palette is used, default: FALSE.
+#' @param legend.position position of legend, default: "right".
+#' @param ... further arguments to be passed.
+#' @return ggplot theme.
+#' @seealso
+#'  \code{\link[ggplot2]{theme}}
+#' @rdname mistr_theme
+#' @export
+mistr_theme <- function(grey = FALSE, blue = FALSE, legend.position = "right", ...) {
+  colorss <- if(grey) {
+    c(text = "#d2d1cf", In = "#878580", title = "#d2d1cf", out = "#494843")
+  } else if(blue) {
+    c(text = "#b7c8d0", In = "#88a4b1", title = "#e7ecef", out = "#0d3a50")
+  } else{
+    c(text = "#d4acbb", In = "#6b374b", title = "#ecd5de", out = "#490520")
+  }
+  thm2 <- defaulttheme() + ggplot2::theme(text = ggplot2::element_text(color = colorss["text"]),
+                                          title = ggplot2::element_text(color = colorss["title"]),
+                                          line = ggplot2::element_line(color = colorss["text"]),
+                                          rect = ggplot2::element_rect(fill = colorss["out"], color = NA),
+                                          axis.ticks = ggplot2::element_line(color = colorss["text"]),
+                                          axis.line = ggplot2::element_line(color = colorss["text"], linetype = 1),
+                                          axis.title.y = ggplot2::element_text(angle = 90),
+                                          legend.background = ggplot2::element_rect(fill = NULL, color = NA),
+                                          legend.key = ggplot2::element_rect(fill = NULL, colour = NULL, linetype = 0),
+                                          panel.background = ggplot2::element_rect(fill = colorss["In"], colour = NA),
+                                          panel.border = ggplot2::element_blank(),
+                                          panel.grid = ggplot2::element_line(color = colorss["out"]),
+                                          panel.grid.major = ggplot2::element_line(color = colorss["out"]),
+                                          panel.grid.minor = ggplot2::element_line(color = colorss["out"], size = 0.25),
+                                          plot.background = ggplot2::element_rect(linetype = 0),
+                                          legend.position = legend.position)
+  thm2
+}
+
+#' @title Autoplot of Distributions Using ggplot2
+#' @description The function \code{autoplot} plots the CDF and PDF of a given distribution object.
+#' @param x distribution object.
+#' @param which whether to plot only CDF, PDF or both, default: 'all'.
+#' @param ncols in how many columns should the plots be merged, default: 2.
+#' @param ... further arguments to be passed.
+#' @details The function is a wrapper of the internal plotting function plotgg. For more 
+#' details see \code{\link{plotgg}}.
+#' @return ggplot object if which = "cdf" or which = "pdf". If both are plotted, the plots are
+#'         merged using \code{multiplot()} function and a list with both plots is invisibly returned.
+#' @examples
+#' \dontrun{
+#' N <- normdist()
+#' autoplot(N)
+#'
+#' # manipulating cdf plot
+#' B <- binomdist(12, 0.5)
+#' autoplot(-3*B, which = "cdf", xlim1 = c(-30, -10))
+#' # manipulating pdf plot
+#' autoplot(-3*B, which = "pdf", xlim2 = c(-30, -10))
+#' }
+#' @seealso \code{\link{plotgg}}
+#' @rdname autoplot.dist
+#' @export autoplot.dist
+#' @rawNamespace if(getRversion() >= "3.6.0") { 
+#'   S3method(ggplot2::autoplot, "dist")
+#'   S3method(ggplot2::autoplot, "comp_fit")
+#' }
+autoplot.dist <- function(x, which = "all", ncols = 2, ...){
+   if (tolower(which) == "cdf") {
+      plotgg(x, which = "cdf", ...)
+   } else if (tolower(which) == "pdf") {
+      plotgg(x, which = "pdf", ...)
+   } else{
+      p1 <- plotgg(x, which = "cdf", ...)
+      p2 <- plotgg(x, which = "pdf", ...)
+      multiplot(p1, p2, cols = ncols)
+      invisible(list(cdf = p1, pdf = p2))
+   }
+}
+
+#' @title Autoplot of Distributions Using ggplot2
+#' @description The function \code{plotgg} plots the CDF and PDF of a given distribution object.
+#' @param x distribution object.
+#' @param which whether to plot only CDF, PDF or both, default: 'all'.
+#' @param only_mix whether to plot only mixture/composite model and not also the components, default: FALSE.
+#' @param pp1 number of points at which CDF is evaluated, default: 1000.
+#' @param pp2 number of points at which PDF is evaluated, default: 1000.
+#' @param col color used in plot, default: '#122e94'.
+#' @param xlim1 xlim of CDF plot, default: q(x, c(0.01, 0.99)).
+#' @param ylim1 ylim of CDF plot, default: NULL.
+#' @param xlim2 xlim of PDF plot, default: xlim1.
+#' @param ylim2 ylim of PDF plot, default: NULL.
+#' @param xlab1 xlab of CDF plot, default: NULL.
+#' @param ylab1 ylab of CDF plot, default: NULL.
+#' @param xlab2 xlab of PDF plot, default: NULL.
+#' @param ylab2 ylab of PDF plot, default: NULL.
+#' @param main1 title of CDF plot, default: 'CDF'.
+#' @param main2 title of PDF plot, default: 'PDF'/'PMF'.
+#' @param size1 size used in CDF plot.
+#' @param size2 size used in PDF plot.
+#' @param alpha1 alpha used in CDF plot.
+#' @param alpha2 alpha used in PDF plot.
+#' @param legend.position1 legend.position used in CDF plot.
+#' @param legend.position2 legend.position used in PDF plot.
+#' @param text_ylim y coordinate for text annotation, default: -0.01.
+#' @param width width of the bars that are used to plot discrete mixtures, default: 0.25.
+#' @param col_segment col of additional segment if contained in the plot (composite and discrete distributions).
+#' @param lty_segment lty of additional segment if contained in the plot (composite and discrete distributions).
+#' @param lwd_segment lwd of additional segment if contained in the plot (composite and discrete distributions).
+#' @param ... further arguments to be passed.
+#' @return ggplot object if which = "cdf" or which = "pdf". If both are plotted, the plots are
+#'         merged using \code{multiplot()} function and a list with both plots is invisibly returned.
+#' @examples
+#' \dontrun{
+#' N <- normdist()
+#' autoplot(N)
+#'
+#' # manipulating cdf plot
+#' B <- binomdist(12, 0.5)
+#' autoplot(-3*B, which = "cdf", xlim1 = c(-30, -10))
+#' # manipulating pdf plot
+#' autoplot(-3*B, which = "pdf", xlim2 = c(-30, -10))
+#' }
+#' @rdname plotgg
+plotgg <- function(x, which = "all", ...){
+  if (!requireNamespace("ggplot2", quietly = TRUE)) {
+    stop("Package ggplot2 needed for this function to work. Please install it.",
+         call. = FALSE)
+  }
+  UseMethod("plotgg")
+}
+
+
+#' @rdname plotgg
+plotgg.contdist <- function(x, which = "all", pp1 = 1000, pp2 = 1000, col = "#F9D607", xlim1 = q(x, c(0.01, 0.99)),
+                            ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL, xlab1 = NULL, ylab1 = NULL, xlab2 = NULL, ylab2 = NULL, main1 = "CDF", main2 = "PDF",
+                            size1 = 1, size2 = 1, alpha1 = 0.7, alpha2 = 0.7, ...) {
+  if (any(is.infinite(xlim1))) stop("please select xlim")
+  if (tolower(which) == "cdf") {
+    t <- seq.int(xlim1[1], xlim1[2], length.out = pp1)
+    h <- p(x, t)
+    df1 <- data.frame(t, h)
+    ggplot2::ggplot(df1) + ggplot2::geom_area(ggplot2::aes(t, h), color = col, fill = col, size = size1, alpha = alpha1) +
+      ggplot2::labs(x = xlab1, y = ylab1, title = main1) +
+      ggplot2::coord_cartesian(xlim = xlim1, ylim = ylim1) +
+      mistr_theme(...)
+  } else{
+    tt <- seq.int(xlim2[1], xlim2[2], length.out = pp2)
+    h <- d(x, tt)
+    df1 <- data.frame(tt, h)
+    ggplot2::ggplot(df1) + ggplot2::geom_area(ggplot2::aes(tt, h), color = col, fill = col, size = size2, alpha = alpha2) +
+      ggplot2::labs(x = xlab2, y = ylab2,title = main2) +
+      ggplot2::coord_cartesian(xlim = xlim2, ylim = ylim2) +
+      mistr_theme(...)
+  } 
+}
+#' @rdname plotgg
+plotgg.trans_contdist <- function(x, which = "all", pp1 = 1000, pp2 = 1000, col = "#F9D607", xlim1 = q(x, c(0.01, 0.99)),
+                                  ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL, xlab1 = NULL, ylab1 = NULL, xlab2 = NULL, ylab2 = NULL, main1 = "CDF", main2 = "PDF",
+                                  size1 = 1, size2 = 1, alpha1 = 0.7, alpha2 = 0.7, ...) {
+  if (any(is.infinite(xlim1))) stop("please select xlim")
+  if (tolower(which) == "cdf") {
+    t <- seq.int(xlim1[1], xlim1[2], length.out = pp1)
+    h <- p(x, t)
+    df1 <- data.frame(t, h)
+    ggplot2::ggplot(df1) + ggplot2::geom_area(ggplot2::aes(t, h), color = col, fill = col, size = size1, alpha = alpha1) +
+      ggplot2::labs(x = xlab1, y = ylab1,title = main1) +
+      ggplot2::coord_cartesian(xlim = xlim1, ylim = ylim1) +
+      mistr_theme(...)
+  } else {
+    tt <- seq.int(xlim2[1], xlim2[2], length.out = pp2)
+    h <- d(x, tt)
+    df1 <- data.frame(tt, h)
+    ggplot2::ggplot(df1) + ggplot2::geom_area(ggplot2::aes(tt, h), color = col, fill = col, size = size2, alpha = alpha2) +
+      ggplot2::labs(x = xlab2, y = ylab2,title = main2) +
+      ggplot2::coord_cartesian(xlim = xlim2, ylim = ylim2) +
+      mistr_theme(...)
+  } 
+}
+#' @rdname plotgg
+plotgg.discrdist <- function(x, which = "all", col = "#F9D607", xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1,
+                             ylim2 = NULL, xlab1 = NULL, ylab1 = NULL, xlab2 = NULL, ylab2 = NULL, main1 = "CDF", main2 = "PMF", size1 = 3.3, size2 = 3.3,
+                             alpha1 = 0.9, alpha2 = 0.9, col_segment = "#b05e0b", ...) {
+  if (any(is.infinite(xlim1))) stop("please select xlim")
+  if (tolower(which) == "cdf") {
+    t <- jumps(x, xlim1)
+    V <- p(x, t)
+    m <- length(t)
+    t2 <- t[-m]
+    df1 <- data.frame(t, V)
+    dfs <- data.frame(t = t[-1], V = V[-m], t2)
+    ggplot2::ggplot() + ggplot2::geom_point(data = dfs, ggplot2::aes(t, V), color = "white", size = size1, alpha = alpha1) +
+      ggplot2::geom_point(data = df1, ggplot2::aes(t, V), color = col, size = size1, alpha = alpha1) +
+      ggplot2::geom_point(data = dfs, ggplot2::aes(t, V), size = 1) +
+      ggplot2::geom_point(data = df1, ggplot2::aes(t, V), size = 1) +
+      ggplot2::geom_segment(data = dfs, ggplot2::aes(x = t2, y = V, xend = t, yend = V), color = col_segment) +
+      ggplot2::labs(x = xlab1, y = ylab1, title = main1) +
+      ggplot2::coord_cartesian(xlim = xlim1, ylim = ylim1) +
+      mistr_theme(...)
+  } else {
+    t <- jumps(x, xlim2)
+    V <- d(x, t)
+    df2 <- data.frame(t, V)
+    ggplot2::ggplot(df2) + ggplot2::geom_point(ggplot2::aes(t, V), color = col, size = size2, alpha = alpha2) +
+      ggplot2::geom_point(ggplot2::aes(t, V), size = 1) +
+      ggplot2::geom_segment(ggplot2::aes(x = t, y = 0, xend = t, yend = V), color = col_segment) +
+      ggplot2::labs(x = xlab2, y = ylab2, title = main2) +
+      ggplot2::coord_cartesian(xlim = xlim2, ylim = ylim2) +
+      mistr_theme(...)
+  } 
+}
+#' @rdname plotgg
+plotgg.trans_discrdist <- function(x, which = "all", col = "#F9D607", xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1,
+                                   ylim2 = NULL, xlab1 = NULL, ylab1 = NULL, xlab2 = NULL, ylab2 = NULL, main1 = "CDF", main2 = "PMF", size1 = 3.3, size2 = 3.3,
+                                   alpha1 = 0.9, alpha2 = 0.9, col_segment = "#b05e0b", ...) {
+  if (any(is.infinite(xlim1))) stop("please select xlim")
+  if (tolower(which) == "cdf") {
+    t <- jumps(x, xlim1)
+    V <- p(x, t)
+    m <- length(t)
+    t2 <- t[-m]
+    df1 <- data.frame(t, V)
+    dfs <- data.frame(t = t[-1], V = V[-m], t2 = t2)
+    ggplot2::ggplot() + ggplot2::geom_point(data = dfs, ggplot2::aes(t, V), color = "white", size = size1, alpha = alpha1) +
+      ggplot2::geom_point(data = df1, ggplot2::aes(t, V), color = col, size = size1, alpha = alpha1) +
+      ggplot2::geom_point(data = dfs, ggplot2::aes(t, V), size = 1) +
+      ggplot2::geom_point(data = df1, ggplot2::aes(t, V), size = 1) +
+      ggplot2::geom_segment(data = dfs, ggplot2::aes(x = t2, y = V, xend = t, yend = V), color = col_segment) +
+      ggplot2::labs(x = xlab1, y = ylab1, title = main1) +
+      ggplot2::coord_cartesian(xlim = xlim1, ylim = ylim1) +
+      mistr_theme(...)
+  } else {
+    t <- jumps(x, xlim2)
+    V <- d(x, t)
+    df2 <- data.frame(t, V)
+    ggplot2::ggplot(df2) + ggplot2::geom_point(ggplot2::aes(t, V), color = col, size = size2, alpha = alpha2) +
+      ggplot2::geom_point(ggplot2::aes(t, V), size = 1) +
+      ggplot2::geom_segment(ggplot2::aes(x = t, y = 0, xend = t, yend = V), color = col_segment) +
+      ggplot2::labs(x = xlab2, y = ylab2, title = main2) +
+      ggplot2::coord_cartesian(xlim = xlim2, ylim = ylim2) +
+      mistr_theme(...)
+  } 
+}
+#' @rdname plotgg
+plotgg.contmixdist <- function(x, which = "all", only_mix = FALSE, pp1 = 1000, pp2 = 1000, col = "#F9D607", xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL, xlab1 = NULL, ylab1 = NULL, xlab2 = NULL, ylab2 = NULL,
+                               main1 = "CDF", main2 = "PDF", size1 = 1, size2 = 1, alpha1 = 0.4, alpha2 = 0.4, legend.position1 = "none", legend.position2 = "none",
+                                ...) {
+  if (any(is.infinite(xlim1))) stop("please select xlim")
+  g <- x$weights
+  n <- length(x$objects)
+  if (tolower(which) == "cdf") {
+    t <- seq.int(xlim1[1], xlim1[2], length.out = pp1)
+    l2 <- mapply(function(x, y) y * p(x, t), x$objects, g)
+    if (only_mix) {
+      l <- rowSums(l2)
+      df1 <- data.frame(tt = t, val = l, Distribution = factor(rep("Mix", each = pp1)))
+    } else {
+      df1 <- data.frame(tt = rep.int(t, n), val = c(l2), Distribution = factor(rep(1:n, each = pp1), levels = n:1))
+    }
+    ggplot2::ggplot(df1) + ggplot2::geom_area(ggplot2::aes_string(x = "tt", y = "val", fill = "Distribution", color = "Distribution"), size = size1, alpha = alpha1) +
+      ggplot2::labs(x = xlab1, y = ylab1, title = main1) +
+      ggplot2::guides(fill = ggplot2::guide_legend(reverse = TRUE), color = ggplot2::guide_legend(reverse = TRUE)) +
+      mistr_theme(legend.position = legend.position1, ...) +
+      ggplot2::coord_cartesian(xlim = xlim1, ylim = ylim1)
+  } else {
+    t <- seq.int(xlim2[1], xlim2[2], length.out = pp2)
+    l2 <- mapply(function(x, y) y * d(x, t), x$objects, g)
+    l <- rowSums(l2)
+    if (only_mix) {
+      df1 <- data.frame(tt = t, val = l, Distribution = factor(rep("Mix", each = pp2)))
+    } else {
+      df1 <- data.frame(tt = rep.int(t, n + 1), val = c(l2, l), Distribution = factor(rep(c(1:n, "Mix"), each = pp2), levels = c("Mix",
+                                                                                                                             n:1)))
+    }
+    ggplot2::ggplot(df1) + ggplot2::geom_area(ggplot2::aes_string(x = "tt", y = "val", fill = "Distribution", color = "Distribution"), size = size2, alpha = alpha2, position = "identity") +
+      ggplot2::labs(x = xlab2, y = ylab2, title = main2) +
+      mistr_theme(legend.position = legend.position2, ...) +
+      ggplot2::guides(fill = ggplot2::guide_legend(reverse = TRUE), color = ggplot2::guide_legend(reverse = TRUE)) +
+      ggplot2::coord_cartesian(xlim = xlim2, ylim = ylim2)
+  } 
+}
+#' @rdname plotgg
+plotgg.trans_contmixdist <- function(x, which = "all", only_mix = FALSE, pp1 = 1000, pp2 = 1000, col = "#F9D607", xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL, xlab1 = NULL, ylab1 = NULL, xlab2 = NULL, ylab2 = NULL,
+                                     main1 = "CDF", main2 = "PDF", size1 = 1, size2 = 1, alpha1 = 0.4, alpha2 = 0.4, legend.position1 = "none", legend.position2 = "none",
+                                      ...) {
+  if (any(is.infinite(xlim1))) stop("please select xlim")
+  g <- x$weights
+  n <- length(x$objects)
+  obj <- lapply(x$objects, function(z) eval(x$trafo$print, list(X = z)))
+  if (tolower(which) == "cdf") {
+    t <- seq.int(xlim1[1], xlim1[2], length.out = pp1)
+    l2 <- mapply(function(x, y) y * p(x, t), obj, g)
+    if (only_mix) {
+      l <- rowSums(l2)
+      df1 <- data.frame(tt = t, val = l, Distribution = factor(rep("Mix", each = pp1)))
+    } else {
+      df1 <- data.frame(tt = rep.int(t, n), val = c(l2), Distribution = factor(rep(1:n, each = pp1), levels = n:1))
+    }
+    ggplot2::ggplot(df1) + ggplot2::geom_area(ggplot2::aes_string(x = "tt", y = "val", fill = "Distribution", color = "Distribution"), size = size1, alpha = alpha1) +
+      mistr_theme(legend.position = legend.position1, ...) +
+      ggplot2::labs(x = xlab1, y = ylab1, title = main1) +
+      ggplot2::guides(fill = ggplot2::guide_legend(reverse = TRUE), color = ggplot2::guide_legend(reverse = TRUE)) +
+      ggplot2::coord_cartesian(xlim = xlim1, ylim = ylim1)
+  } else {
+    t <- seq.int(xlim2[1], xlim2[2], length.out = pp2)
+    l2 <- mapply(function(x, y) y * d(x, t), obj, g)
+    l <- rowSums(l2)
+    if (only_mix) {
+      df1 <- data.frame(tt = t, val = l, Distribution = factor(rep("Mix", each = pp2)))
+    } else {
+      df1 <- data.frame(tt = rep.int(t, n + 1), val = c(l2, l), Distribution = factor(rep(c(1:n, "Mix"), each = pp2), levels = c("Mix",
+                                                                                                                             n:1)))
+    }
+    ggplot2::ggplot(df1) + ggplot2::geom_area(ggplot2::aes_string(x = "tt", y = "val", fill = "Distribution", color = "Distribution"), size = size2, alpha = alpha2, position = "identity") +
+      mistr_theme(legend.position = legend.position2, ...) +
+      ggplot2::labs(x = xlab2, y = ylab2, title = main2) +
+      ggplot2::guides(fill = ggplot2::guide_legend(reverse = TRUE), color = ggplot2::guide_legend(reverse = TRUE)) +
+      ggplot2::coord_cartesian(xlim = xlim2, ylim = ylim2)
+  } 
+}
+#' @rdname plotgg
+plotgg.discrmixdist <- function(x, which = "all", only_mix = FALSE, pp1 = 1000, col = "#F9D607", xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL,
+                                xlim2 = xlim1, ylim2 = NULL, xlab1 = NULL, ylab1 = NULL, xlab2 = NULL, ylab2 = NULL, main1 = "CDF",
+                                main2 = "PMF", size1 = 1.6, size2 = 1.6, alpha1 = 0.4, alpha2 = 0.9, legend.position1 = "none", legend.position2 = "none",
+                                width = 0.25, ...) {
+  if (any(is.infinite(xlim1))) stop("please select xlim")
+  g <- x$weights
+  l <- length(x$objects)
+  if (tolower(which) == "cdf") {
+    t <- unique(sort(c(seq.int(xlim1[1] - 0.1, xlim1[2] + 0.1, length.out = pp1), jumps(x, xlim1))))
+    if (only_mix) {
+      df1 <- data.frame(tt = t, val = p(x, t), Distribution = factor(rep("Mix", each = length(t))))
+    } else {
+      l2 <- mapply(function(x, y) y * p(x, t), x$objects, g)
+      df1 <- data.frame(tt = rep.int(t, l), val = c(l2), Distribution = factor(rep(1:l, each = length(t)), levels = l:1))
+    }
+    ggplot2::ggplot(df1) + ggplot2::geom_area(ggplot2::aes_string(x = "tt", y = "val", fill = "Distribution", color = "Distribution"), alpha = alpha1, size = size1) +
+      mistr_theme(legend.position = legend.position1, ...) +
+      ggplot2::guides(fill = ggplot2::guide_legend(reverse = TRUE), color = ggplot2::guide_legend(reverse = TRUE)) +
+      ggplot2::labs(x = xlab1, y = ylab1, title = main1) +
+      ggplot2::coord_cartesian(xlim = xlim1, ylim = ylim1)
+  } else {
+    t <- jumps(x, xlim2)
+    l2 <- mapply(function(x, y) y * d(x, t), x$objects, g)
+    l3 <- rowSums(l2)
+    if (only_mix) {
+      df1 <- data.frame(tt = t, val = l3, Distribution = factor(rep("Mix", each = length(t))))
+    } else {
+      df1 <- data.frame(tt = rep.int(t, l), val = c(l2), Distribution = factor(rep(c(1:l), each = length(t)), levels = c(l:1)))
+    }
+    ggplot2::ggplot(df1, ggplot2::aes(width = width)) + ggplot2::geom_bar(ggplot2::aes_string(x = "tt", y = "val", fill = "Distribution"), alpha = alpha2, stat = "identity") +
+      mistr_theme(legend.position = legend.position2, ...) +
+      ggplot2::labs(x = xlab2, y = ylab2, title = main2) +
+      ggplot2::guides(fill = ggplot2::guide_legend(reverse = TRUE), color = ggplot2::guide_legend(reverse = TRUE)) +
+      ggplot2::coord_cartesian(xlim = xlim2, ylim = ylim2)
+  } 
+}
+#' @rdname plotgg
+plotgg.trans_discrmixdist <- function(x, which = "all", only_mix = FALSE, pp1 = 1000, col = "#F9D607", xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL, xlab1 = NULL, ylab1 = NULL, xlab2 = NULL, ylab2 = NULL, main1 = "CDF",
+                                      main2 = "PMF", size1 = 1.6, size2 = 1.6, alpha1 = 0.4, alpha2 = 0.9, legend.position1 = "none", legend.position2 = "none",
+                                      width = 0.25, ...) {
+  if (any(is.infinite(xlim1))) stop("please select xlim")
+  g <- x$weights
+  l <- length(x$objects)
+  obj <- lapply(x$objects, function(z) eval(x$trafo$print, list(X = z)))
+  if (tolower(which) == "cdf") {
+    t <- unique(sort(c(seq.int(xlim1[1] - 0.1, xlim1[2] + 0.1, length.out = pp1), jumps(x, xlim1))))
+    if (only_mix) {
+      df1 <- data.frame(tt = t, val = p(x, t), Distribution = factor(rep("Mix", each = length(t))))
+    } else {
+      l2 <- mapply(function(x, y) y * p(x, t), obj, g)
+      df1 <- data.frame(tt = rep.int(t, l), val = c(l2), Distribution = factor(rep(1:l, each = length(t)), levels = l:1))
+    }
+    ggplot2::ggplot(df1) + ggplot2::geom_area(ggplot2::aes_string(x = "tt", y = "val", fill = "Distribution", color = "Distribution"), alpha = alpha1, size = size1) +
+      mistr_theme(legend.position = legend.position1, ...) +
+      ggplot2::guides(fill = ggplot2::guide_legend(reverse = TRUE), color = ggplot2::guide_legend(reverse = TRUE)) +
+      ggplot2::labs(x = xlab1, y = ylab1, title = main1) +
+      ggplot2::coord_cartesian(xlim = xlim1, ylim = ylim1)
+  } else {
+    t <- jumps(x, xlim2)
+    l2 <- mapply(function(x, y) y * d(x, t), obj, g)
+    l3 <- rowSums(l2)
+    if (only_mix) {
+      df1 <- data.frame(tt = t, val = l3, Distribution = factor(rep("Mix", each = length(t))))
+    } else {
+      df1 <- data.frame(tt = rep.int(t, l), val = c(l2), Distribution = factor(rep(c(1:l), each = length(t)), levels = c(l:1)))
+    }
+    ggplot2::ggplot(df1, ggplot2::aes(width = width)) + ggplot2::geom_bar(ggplot2::aes_string(x = "tt", y = "val", fill = "Distribution"), alpha = alpha2, stat = "identity") +
+      mistr_theme(legend.position = legend.position2, ...) +
+      ggplot2::labs(x = xlab2, y = ylab2, title = main2) +
+      ggplot2::guides(fill = ggplot2::guide_legend(reverse = TRUE), color = ggplot2::guide_legend(reverse = TRUE)) +
+      ggplot2::coord_cartesian(xlim = xlim2, ylim = ylim2)
+  } 
+}
+#' @rdname plotgg
+plotgg.contdiscrmixdist <- function(x, which = "all", only_mix = FALSE, pp1 = 1000, pp2 = 1000, col = "#F9D607", xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL, xlab1 = NULL, ylab1 = NULL, xlab2 = NULL, ylab2 = NULL,
+                                    main1 = "CDF", main2 = "PDF", size1 = 1.6, size2 = 1.6, alpha1 = 0.4, alpha2 = 0.4, legend.position1 = "none", legend.position2 = "none",
+                                     ...) {
+  if (any(is.infinite(xlim1))) stop("please select xlim")
+  g <- x$weights
+  l <- length(x$objects)
+  if (tolower(which) == "cdf") {
+    t <- unique(sort(c(seq.int(xlim1[1], xlim1[2], length.out = pp1), jumps(x, xlim1))))
+    if (only_mix) {
+      df1 <- data.frame(tt = t, val = p(x, t), Distribution = factor(rep("Mix", each = length(t))))
+    } else {
+      l2 <- mapply(function(x, y) y * p(x, t), x$objects, g)
+      df1 <- data.frame(tt = rep.int(t, l), val = c(l2), Distribution = factor(rep(1:l, each = length(t)), levels = l:1))
+    }
+    ggplot2::ggplot(df1) + ggplot2::geom_area(ggplot2::aes_string(x = "tt", y = "val", fill = "Distribution", color = "Distribution"), alpha = alpha1, size = size1) +
+      mistr_theme(legend.position = legend.position1, ...) +
+      ggplot2::guides(fill = ggplot2::guide_legend(reverse = TRUE), color = ggplot2::guide_legend(reverse = TRUE)) +
+      ggplot2::labs(x = xlab1, y = ylab1, title = main1) +
+      ggplot2::coord_cartesian(xlim = xlim1, ylim = ylim1)
+  } else {
+    t <- unique(sort(c(seq.int(xlim2[1], xlim2[2], length.out = pp2), jumps(x, xlim2))))
+    l2 <- mapply(function(x, y) y * d(x, t), x$objects, g)
+    l3 <- rowSums(l2)
+    if (only_mix) {
+      df1 <- data.frame(tt = t, val = l3, Distribution = factor(rep("Mix", each = length(t))))
+    } else {
+      df1 <- data.frame(tt = rep.int(t, l + 1), val = c(l2, l3), Distribution = factor(rep(c(1:l, "Mix"), each = length(t)),
+                                                                                   levels = c("Mix", l:1)))
+    }
+    ggplot2::ggplot(df1) + ggplot2::geom_area(ggplot2::aes_string(x = "tt", y = "val", fill = "Distribution", color = "Distribution"), alpha = alpha2, size = size2, position = "identity") +
+      mistr_theme(legend.position = legend.position2, ...) +
+      ggplot2::guides(fill = ggplot2::guide_legend(reverse = TRUE), color = ggplot2::guide_legend(reverse = TRUE)) +
+      ggplot2::labs(x = xlab2, y = ylab2, title = main2) +
+      ggplot2::coord_cartesian(xlim = xlim2, ylim = ylim2)
+  } 
+}
+#' @rdname plotgg
+plotgg.trans_contdiscrmixdist <- function(x, which = "all", only_mix = FALSE, pp1 = 1000, pp2 = 1000, col = "#F9D607", xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL, xlab1 = NULL, ylab1 = NULL, xlab2 = NULL, ylab2 = NULL,
+                                          main1 = "CDF", main2 = "PDF", size1 = 1.6, size2 = 1.6, alpha1 = 0.4, alpha2 = 0.4, legend.position1 = "none", legend.position2 = "none",
+                                           ...) {
+  if (any(is.infinite(xlim1))) stop("please select xlim")
+  g <- x$weights
+  l <- length(x$objects)
+  obj <- lapply(x$objects, function(z) eval(x$trafo$print, list(X = z)))
+  if (tolower(which) == "cdf") {
+    t <- unique(sort(c(seq.int(xlim1[1], xlim1[2], length.out = pp1), jumps(x, xlim1))))
+    if (only_mix) {
+      df1 <- data.frame(tt = t, val = p(x, t), Distribution = factor(rep("Mix", each = length(t))))
+    } else {
+      l2 <- mapply(function(x, y) y * p(x, t), obj, g)
+      df1 <- data.frame(tt = rep.int(t, l), val = c(l2), Distribution = factor(rep(1:l, each = length(t)), levels = l:1))
+    }
+    ggplot2::ggplot(df1) + ggplot2::geom_area(ggplot2::aes_string(x = "tt", y = "val", fill = "Distribution", color = "Distribution"), alpha = alpha1, size = size1) +
+      mistr_theme(legend.position = legend.position1, ...) +
+      ggplot2::labs(x = xlab1, y = ylab1, title = main1) +
+      ggplot2::guides(fill = ggplot2::guide_legend(reverse = TRUE), color = ggplot2::guide_legend(reverse = TRUE)) +
+      ggplot2::coord_cartesian(xlim = xlim1, ylim = ylim1)
+  } else {
+    t <- unique(sort(c(seq.int(xlim2[1], xlim2[2], length.out = pp2), jumps(x, xlim2))))
+    l2 <- mapply(function(x, y) y * d(x, t), obj, g)
+    l3 <- rowSums(l2)
+    if (only_mix) {
+      df1 <- data.frame(tt = t, val = l3, Distribution = factor(rep("Mix", each = length(t))))
+    } else {
+      df1 <- data.frame(tt = rep.int(t, l + 1), val = c(l2, l3), Distribution = factor(rep(c(1:l, "Mix"), each = length(t)),
+                                                                                   levels = c("Mix", l:1)))
+    }
+    ggplot2::ggplot(df1) + ggplot2::geom_area(ggplot2::aes_string(x = "tt", y = "val", fill = "Distribution", color = "Distribution"), alpha = alpha2, size = size2, position = "identity") +
+      mistr_theme(legend.position = legend.position2, ...) +
+      ggplot2::labs(x = xlab2, y = ylab2, title = main2) +
+      ggplot2::guides(fill = ggplot2::guide_legend(reverse = TRUE), color = ggplot2::guide_legend(reverse = TRUE)) +
+      ggplot2::coord_cartesian(xlim = xlim2, ylim = ylim2)
+  } 
+}
+#' @rdname plotgg
+plotgg.compdist <- function(x, which = "all", only_mix = FALSE, pp1 = 1000, pp2 = 1000, col = "#F9D607", xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL, xlab1 = NULL, ylab1 = NULL, xlab2 = NULL, ylab2 = NULL, main1 = "CDF",
+                            main2 = "PDF", size1 = 1.6, size2 = 1.6, alpha1 = 0.4, alpha2 = 0.4, legend.position1 = "none", legend.position2 = "none",
+                            text_ylim = -0.01, col_segment = "white", lty_segment = 3, lwd_segment = 1.8, ...) {
+  if (any(is.infinite(xlim1))) stop("please select xlim")
+  g <- x$weights
+  l <- length(x$objects)
+  x$breakpoints <- sort(x$breakpoints)
+  if (tolower(which) == "cdf") {
+    t <- sort(unique(c(seq.int(xlim1[1], xlim1[2], length.out = pp1), jumps(x, xlim1))))
+    val = p(x, t)
+    if (only_mix) {
+      df1 <- data.frame(tt = t, val = val, Distribution = factor(rep("Mix", each = length(t))))
+    } else {
+      int <- findInterval2(t, x$breakpoints, x$interval) + 1
+      g2 <- cumsum(c(0, g))
+      l2 <- sapply(seq_along(x$objects), function(i) {
+        z <- numeric(length(t))
+        z[int == i] <- val[int == i] - g2[i]
+        z[int > i] <- g[i]
+        z
+      })
+      df1 <- data.frame(tt = rep.int(t, l), val = c(l2), Distribution = factor(rep(1:l, each = length(t)), levels = l:1))
+    }
+    ggplot2::ggplot(df1) + ggplot2::geom_area(ggplot2::aes_string(x = "tt", y = "val", fill = "Distribution", color = "Distribution"), alpha = alpha1, size = size1) +
+      mistr_theme(legend.position = legend.position1, ...) +
+      ggplot2::labs(x = xlab1, y = ylab1, title = main1) +
+      ggplot2::guides(fill = ggplot2::guide_legend(reverse = TRUE), color = ggplot2::guide_legend(reverse = TRUE)) +
+      ggplot2::coord_cartesian(xlim = xlim1, ylim = ylim1)
+  } else {
+    t <- sort(unique(c(seq.int(xlim2[1], xlim2[2], length.out = pp2), jumps(x, xlim2))))
+    val = c(d(x, t), rep.int(0, sum(duplicated(x$breakpoints))))
+    t <- c(t, x$breakpoints[duplicated(x$breakpoints)])
+    dubl <- duplicated(x$breakpoints) | duplicated(x$breakpoints, fromLast = TRUE)
+    g2 <- paste0(round(cumsum(g[-length(g)]) * 100, 2), "%")
+    br <- unique(x$breakpoints)
+    g22 <- numeric(length(br))
+    g22[table(x$breakpoints) == 1] <- g2[!dubl]
+    g22[table(x$breakpoints) == 2] <- paste(g2[dubl][c(T, F)], g2[dubl][c(F, T)], sep = "-")
+    if (only_mix) {
+      df1 <- data.frame(tt = t, val = val, Distribution = factor(rep("Mix", each = length(t))))
+    } else {
+      int <- findInterval2(t, x$breakpoints, x$interval) + 1
+      df1 <- data.frame(tt = t, val = val, Distribution = factor(int, levels = l:1))
+    }
+    ggplot2::ggplot(df1) + ggplot2::geom_area(ggplot2::aes_string(x = "tt", y = "val", fill = "Distribution"), alpha = alpha2, position = "identity") +
+      ggplot2::geom_line(ggplot2::aes_string(x = "tt", y = "val", color = "Distribution"), size = size2) +
+      ggplot2::geom_segment(data = data.frame(x = x$breakpoints), ggplot2::aes(x = x, y = -0.001, xend = x, yend = max(val)), lwd = lwd_segment, lty = lty_segment, col = col_segment) +
+      mistr_theme(legend.position = legend.position2, ...) +
+      ggplot2::annotate("text", x = br, y = text_ylim, label = g22, col = col_segment) +
+      ggplot2::guides(fill = ggplot2::guide_legend(reverse = TRUE), color = ggplot2::guide_legend(reverse = TRUE)) +
+      ggplot2::labs(x = xlab2, y = ylab2, title = main2) +
+      ggplot2::coord_cartesian(xlim = xlim2, ylim = ylim2)
+  } 
+}
+#' @rdname plotgg
+plotgg.trans_compdist <- function(x, which = "all", only_mix = FALSE, pp1 = 1000, pp2 = 1000, col = "#F9D607", xlim1 = q(x, c(0.01, 0.99)), ylim1 = NULL, xlim2 = xlim1, ylim2 = NULL, xlab1 = NULL, ylab1 = NULL, xlab2 = NULL, ylab2 = NULL,
+                                  main1 = "CDF", main2 = "PDF", size1 = 1.6, size2 = 1.6, alpha1 = 0.4, alpha2 = 0.4, legend.position1 = "none", legend.position2 = "none",
+                                  text_ylim = -0.01, col_segment = "white", lty_segment = 3, lwd_segment = 1.8, ...) {
+  
+  if (any(is.infinite(xlim1))) stop("please select xlim")
+  l <- length(x$objects)
+  if (monot(x) == 1) {
+    spec <- x$interval
+    g <- x$weights
+    dif <- x$trunc$diff
+    lev <- l:1
+  } else {
+    spec <- sapply(rev(x$interval), function(x) if (x == "L")
+      "R" else "L")
+    dif <- rev(x$trunc$diff)
+    g <- rev(x$weights)
+    lev <- 1:l
+  }
+  breakp <- sort(eval(x$trafo$trans, list(X = x$breakpoints)))
+  if (tolower(which) == "cdf") {
+    t <- sort(unique(c(seq.int(xlim1[1], xlim1[2], length.out = pp1), jumps(x, xlim1))))
+    val = p(x, t)
+    if (only_mix) {
+      df1 <- data.frame(tt = t, val = val, Distribution = factor(rep("Mix", each = length(t))))
+    } else {
+      int <- findInterval2(t, breakp, spec) + 1
+      g2 <- cumsum(c(0, g))
+      l2 <- sapply(seq_along(x$objects), function(i) {
+        z <- numeric(length(t))
+        z[int == i] <- val[int == i] - g2[i]
+        z[int > i] <- g[i]
+        z
+      })
+      l2 <- round(l2, 12)
+      df1 <- data.frame(tt = rep.int(t, l), val = c(l2), Distribution = factor(rep(rev(lev), each = length(t)), levels = lev))
+    }
+    ggplot2::ggplot(df1) + ggplot2::geom_area(ggplot2::aes_string(x = "tt", y = "val", fill = "Distribution", color = "Distribution"), alpha = alpha1, size = size1) +
+      mistr_theme(legend.position = legend.position1, ...) +
+      ggplot2::labs(x = xlab1, y = ylab1, title = main1) +
+      ggplot2::guides(fill = ggplot2::guide_legend(reverse = TRUE), color = ggplot2::guide_legend(reverse = TRUE)) +
+      ggplot2::coord_cartesian(xlim = xlim1, ylim = ylim1)
+  } else {
+    t <- sort(unique(c(seq.int(xlim2[1], xlim2[2], length.out = pp2), jumps(x, xlim2))))
+    val = c(d(x, t), rep.int(0, sum(duplicated(x$breakpoints))))
+    t <- c(t, breakp[duplicated(breakp)])
+    dubl <- duplicated(breakp) | duplicated(breakp, fromLast = TRUE)
+    g2 <- paste0(round(cumsum(g[-length(g)]) * 100, 2), "%")
+    br <- unique(breakp)
+    g22 <- numeric(length(br))
+    g22[table(breakp) == 1] <- g2[!dubl]
+    g22[table(breakp) == 2] <- paste(g2[dubl][c(T, F)], g2[dubl][c(F, T)], sep = "-")
+    if (only_mix) {
+      df1 <- data.frame(tt = t, val = val, Distribution = factor(rep("Mix", each = length(t))))
+    } else {
+      int <- findInterval2(t, breakp, spec) + 1
+      if (monot(x) == -1)
+        int <- l + 1 - int
+      df1 <- data.frame(tt = t, val = val, Distribution = factor(int, levels = lev))
+    }
+    ggplot2::ggplot(df1) + ggplot2::geom_area(ggplot2::aes_string(x = "tt", y = "val", fill = "Distribution"), alpha = alpha2, position = "identity") +
+      mistr_theme(legend.position = legend.position2, ...) +
+      ggplot2::geom_line(ggplot2::aes_string(x = "tt", y = "val", color = "Distribution"), size = size2) +
+      ggplot2::geom_segment(data = data.frame(x = breakp), ggplot2::aes(x = x, y = -0.001, xend = x, yend = max(val)), lwd = lwd_segment, lty = lty_segment, col = col_segment) +
+      ggplot2::annotate("text", x = br, y = text_ylim, label = g22, col = col_segment) +
+      ggplot2::guides(fill = ggplot2::guide_legend(reverse = TRUE), color = ggplot2::guide_legend(reverse = TRUE)) +
+      ggplot2::labs(x = xlab2, y = ylab2, title = main2) +
+      ggplot2::coord_cartesian(xlim = xlim2, ylim = ylim2)
+  } 
+}
+
+#' @title  Implementation of Quantile-Quantile Plot with ggplot2
+#' @description QQplotgg is a generic function that produces QQ plot of two datasets, distribution and dataset or two distributions.
+#' @param d1 distribution object or dataset.
+#' @param d2 distribution object or dataset.
+#' @param line if qqline should be included, default: TRUE.
+#' @param CI if confidence bound should be included.
+#' @param conf confidence level for confidence bound, default: 0.95.
+#' @param n number of points at which quantile functions are evaluated if two distributions are compared, default: 100.
+#' @param col color of points, default: '#F9D607'.
+#' @param line_col color of qqline, default: '#f28df9'.
+#' @param CI_col color of confidence bound , default: line_col.
+#' @param xlab xlab, default: deparse(substitute(d1)).
+#' @param ylab ylab. default: deparse(substitute(d2)).
+#' @param main title, default: 'Q-Q plot'.
+#' @param alpha alpha of points, default: 0.7.
+#' @param CI_alpha alpha of confidence bound, default: 0.4.
+#' @param lwd lwd of qqline, default: 1.
+#' @param ... further arguments to be passed.
+#' @return ggplot object.
+#' @details \code{QQplotgg} is able to compare any combination of dataset and distributions.
+#'
+#'          \code{QQnormgg} is a wrapper around \code{QQplotgg}, where d1 is set to \code{normdist()}.
+#'
+#'          If quantiles of a continuous distribution are compared with a sample, a confidence bound
+#'          for data is offered. This confidence "envelope" is based on the asymptotic results
+#'          of the order statistics. For more details see \url{https://en.wikipedia.org/wiki/Order_statistic}.
+#' @examples
+#' # sample vs sample
+#' QQplotgg(r(normdist(), 10000), r(tdist(df = 4), 10000))
+#'
+#' # distribution vs sample
+#' QQplotgg(normdist(), r(tdist(df = 4), 10000))
+#'
+#' # distribution vs distribution
+#' QQplotgg(normdist(), tdist(df = 4))
+#' @rdname QQplotgg
+#' @export
+QQplotgg <- function(d1, d2, line = TRUE, col = "#F9D607", line_col = "#f28df9",
+                     xlab = deparse(substitute(d1)), ylab , main = "Q-Q plot", alpha, lwd = 1, ...){
+  if (!requireNamespace("ggplot2", quietly = TRUE)) {
+    stop("Package ggplot2 needed for this function to work. Please install it.",
+         call. = FALSE)
+  }
+  UseMethod("QQplotgg")
+}
+#' @rdname QQplotgg
+#' @export
+QQplotgg.default <- function(d1, d2, line = TRUE, col = "#F9D607", line_col = "#f28df9", xlab = deparse(substitute(d1)),
+                             ylab = deparse(substitute(d2)), main = "Q-Q plot", alpha = 0.5, lwd = 1, ...) {
+  if(is.dist(d2)) return(QQplotgg.dist(d2, d1, line = line, col = col,line_col = line_col, xlab = ylab,
+                                       ylab = xlab, main = main, alpha = alpha, lwd = lwd,...))
+  df <- as.data.frame(qqplot(d1, d2, plot.it = FALSE))
+  if (line) {
+    p <- ggplot2::ggplot(df, ggplot2::aes_string(x = "x", y = "y")) +
+      ggplot2::geom_smooth(method = "lm", color = line_col, lwd = lwd, se = FALSE)
+  } else {
+    p <- ggplot2::ggplot(df, ggplot2::aes_string(x = "x", y = "y"))
+  }
+  p + ggplot2::geom_point(color = col, alpha = alpha) +
+    ggplot2::labs(x = xlab, y = ylab, title = main) +
+    mistr_theme(...)
+}
+#' @rdname QQplotgg
+#' @export
+QQplotgg.dist <- function(d1, d2, line = TRUE, col = "#F9D607", line_col = "#f28df9", xlab = deparse(substitute(d1)),
+                          ylab = ylabe, main = "Q-Q plot", alpha = 0.7, lwd = 1, CI = re, CI_alpha = 0.4, CI_col = line_col,
+                          conf = 0.95, n = 100, ...) {
+  
+  ylabe <- deparse(substitute(d2))
+  if (is.dist(d2)) {
+    re <- FALSE
+    P <- ppoints(n)
+    P2 <- ppoints(n)
+    xp <- q(d1, P)
+    xh <- q(d1, c(0.25, 0.75))
+    yp <- q(d2, P2)
+    yh <- q(d2, c(0.25, 0.75))
+  } else {
+    d2 <- as.vector(d2)
+    re <- is.contin(d1)
+    n <- length(d2)
+    P <- ppoints(n)
+    xp <- q(d1, P)
+    xh <- q(d1, c(0.25, 0.75))
+    yp <- sort(d2)
+    yh <- quantile(d2, c(0.25, 0.75))
+  }
+  
+  slope <- diff(yh)/diff(xh)
+  intercept <- yh[1L] - slope * xh[1L]
+  
+  if (line) {
+    p <- ggplot2::ggplot(data.frame(x = xp, y = yp)) + ggplot2::geom_abline(slope = slope, intercept = intercept, color = line_col, lwd = lwd)
+  } else {
+    p <- ggplot2::ggplot(data.frame(x = xp, y = yp))
+  }
+  if (CI) {
+    z <- qnorm(0.5 + conf/2)
+    sd <- (slope/d(d1, xp)) * sqrt(P * (1 - P)/n)
+    up <- intercept + slope * xp + z * sd
+    do <- intercept + slope * xp - z * sd
+    p <- p + ggplot2::geom_ribbon(data = data.frame(x = xp, d = do, u = up), ggplot2::aes_string(x = "x", ymin = "d", ymax = "u"),
+                                  fill = CI_col, alpha = CI_alpha)
+  }
+  
+  p + ggplot2::geom_point(ggplot2::aes_string(x = "x", y = "y"), color = col, alpha = alpha) +
+    ggplot2::labs(x = xlab, y = ylab, title = main) +
+    mistr_theme(...)
+}
+#' @rdname QQplotgg
+#' @export
+QQnormgg <- function(d2, xlab = "Standard Normal", ylab = deparse(substitute(d2)), ...) {
+  QQplotgg.dist(normdist(), d2, xlab = xlab, ylab = ylab, ...)
+}
+#' @title Autoplot of Fitted Distributions Using ggplot2
+#' @description The functions plot the CDF, PDF and QQ-plot of a fitted distribution object together with the empirical values.
+#' @param x distribution object.
+#' @param which whether to plot only CDF, PDF, qq  or all three, default: 'all'.
+#' @param layout layout of plots, default: matrix(c(1, 2, 1, 3), nrow = 2).
+#' @param empir_color color of empirical data, default: '#F9D607'.
+#' @param empir_alpha alpha of empirical data, default: 0.4.
+#' @param ... further arguments to be passed.
+#' @return ggplot object if \code{which = "cdf"} or \code{which = "pdf"} or \code{which = "qq"}.
+#'         If all are plotted, the plots are merged using \code{multiplot()} function and a list with all plots is invisibly returned.
+#' @seealso \code{\link{plotgg}}
+#' @rdname autoggplot_comp_fit
+#' @export autoplot.comp_fit
+autoplot.comp_fit <- function(x, which = "all", layout = matrix(c(1, 2, 1, 3), nrow = 2),
+                            empir_color = "#F9D607", empir_alpha = 0.4, ...) {
+   if (!requireNamespace("ggplot2", quietly = TRUE)) {
+      stop("Package ggplot2 needed for this function to work. Please install it.",
+           call. = FALSE)
+   }
+  if (tolower(which) == "qq") {
+    QQplotgg(x$Distribution, x$data, xlab = NULL, ylab = NULL, ...)
+  } else if (tolower(which) == "cdf") {
+     plotgg.compdist(x$Distribution, which = "cdf", ...) +
+       ggplot2::geom_line(data = data.frame(x = environment(ecdf(x$data))$x,
+                                           y = environment(ecdf(x$data))$y),ggplot2::aes_string(x = "x", y = "y"), col = empir_color, lwd = 2, lty = 3)
+  } else if (tolower(which) == "pdf"){
+     plotgg.compdist(x$Distribution, which = "pdf", ...) +
+       ggplot2::geom_density(data = data.frame(x = x$data), ggplot2::aes_string(x = "x"), fill = empir_color,
+                            col = empir_color, alpha = empir_alpha, lty = 2, lwd = 1)
+  } else {
+    QQ <- QQplotgg(x$Distribution, x$data, xlab = NULL, ylab = NULL)
+    PDF <- plotgg.compdist(x$Distribution, which = "pdf", ...) + ggplot2::geom_density(data = data.frame(x = x$data), ggplot2::aes_string(x = "x"), fill = empir_color, col = empir_color, alpha = empir_alpha, lty = 2, lwd = 1)
+    CDF <- plotgg.compdist(x$Distribution, which = "cdf", ...) + ggplot2::geom_line(data = data.frame(x = environment(ecdf(x$data))$x, y = environment(ecdf(x$data))$y), ggplot2::aes_string(x = "x", y = "y"), col = empir_color, lwd = 2, lty = 3)
+    multiplot(QQ, CDF, PDF, layout = layout)
+    invisible(list(qq = QQ, cdf = CDF, pdf = PDF))
+  }
+}
+
+plot_riskgg <- function(model, da, text_ylim = -0.15, size = 1) {
+  if (!requireNamespace("ggplot2", quietly = TRUE)) {
+    stop("Package ggplot2 needed for this function to work. Please install it.",
+         call. = FALSE)
+  }
+  a2 <- sapply(da[, 1] * 100, function(z) substitute(VaR[x], list(x = z)))
+  b2 <- sapply(da[, 1] * 100, function(z) substitute(ES[x], list(x = z)))
+  c2 <- if (dim(da)[2] == 4)
+    sapply(da[, 1] * 100, function(z) substitute(Exp[x], list(x = z))) else NULL
+  var_es <- -unlist(da[, -1])
+  value <- d(distribution(model), var_es)
+  autoplot.comp_fit(model, which = "pdf", xlim2 = c(min(var_es), max(var_es)), ylim2 = c(0, max(value)), text_ylim = text_ylim) +
+    ggplot2::annotate("segment", x = var_es, xend = var_es, y = 0, yend = d(distribution(model), var_es), col = "#f99d5f", size = 2,
+                      lty = 4) + ggplot2::annotate("text", x = var_es, y = text_ylim, label = as.character(c(a2, b2, c2)), col = "#f99d5f", size = size,
+                                                   parse = TRUE)
+}

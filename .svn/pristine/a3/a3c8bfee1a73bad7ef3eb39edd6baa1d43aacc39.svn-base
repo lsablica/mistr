@@ -1,0 +1,104 @@
+@article{gendist,
+title = {Gendist: An R Package for Generated Probability Distribution Models},
+author = {Bakar, {Shaiful Anuar Abu} and Saralees Nadarajah and {Kamarul Adzhar}, {Zahrul Azmir Absl} and Ibrahim Mohamed},
+year = {2016},
+month = {6},
+volume = {11},
+journal = {P L o S One},
+issn = {1932-6203},
+publisher = {Public Library of Science},
+number = {6},
+url = {https://doi.org/10.1371/journal.pone.0156537}
+}
+
+@article{actuar,
+   author = {Christophe Dutang and Vincent Goulet and Mathieu Pigeon},
+   title = {actuar: An R Package for Actuarial Science},
+   journal = {Journal of Statistical Software, Articles},
+   volume = {25},
+   number = {7},
+   year = {2008},
+   issn = {1548-7660},
+   pages = {1--37},
+   url = {https://doi.org/10.18637/jss.v025.i07}
+}
+
+@Manual{mle,
+    title = {bbmle: Tools for General Maximum Likelihood Estimation},
+    author = {{Ben Bolker and R Development Core Team}},
+    year = {2017},
+    note = {R package version 1.0.20},
+    url = {https://CRAN.R-project.org/package=bbmle},
+}
+
+@article{3c,
+author = { Kahadawala   Cooray  and  Malwane M.A.   Ananda },
+title = {Modeling actuarial data with a composite lognormal-Pareto model},
+journal = {Scandinavian Actuarial Journal},
+volume = {2005},
+number = {5},
+pages = {321-334},
+year  = {2005},
+publisher = {Taylor & Francis},
+URL = {https://doi.org/10.1080/03461230510009763},
+eprint = {https://www.tandfonline.com/doi/pdf/10.1080/03461230510009763}
+}
+
+
+@Article{7,
+    title = {S4 Classes for Distributions},
+    author = {P. Ruckdeschel and M. Kohl and T. Stabla and F. Camphausen},
+    language = {English},
+    year = {2006},
+    journal = {R News},
+    year = {2006},
+    volume = {6},
+    number = {2},
+    pages = {2--6},
+    month = {May},
+    pdf = {https://CRAN.R-project.org/doc/Rnews/Rnews_2006-2.pdf},
+}
+
+
+@article{2b,
+  author = {S. Nadarajah and S. A. A. Bakar},
+  title = {{CompLognormal: An R Package for Composite Lognormal
+          Distributions}},
+  year = {2013},
+  journal = {{The R Journal}},
+  url = {https://doi.org/10.32614/RJ-2013-030},
+  pages = {97--103},
+  volume = {5},
+  number = {2}
+}
+
+@article{5,
+author = { David P. M.   Scollnik },
+title = {On composite lognormal-Pareto models},
+journal = {Scandinavian Actuarial Journal},
+volume = {2007},
+number = {1},
+pages = {20-33},
+year  = {2007},
+publisher = {Taylor & Francis},
+URL = {https://doi.org/10.1080/03461230601110447},
+eprint = {https://doi.org/10.1080/03461230601110447}
+}
+
+@Book{ggplot2,
+    author = {Hadley Wickham},
+    title = {ggplot2: Elegant Graphics for Data Analysis},
+    publisher = {Springer-Verlag New York},
+    year = {2016},
+    isbn = {978-3-319-24277-4},
+    url = {http://ggplot2.org},
+}
+
+@book{McNeil:2015:QRM:2811305,
+ author = {McNeil, Alexander J. and Frey, Rdiger and Embrechts, Paul},
+ title = {Quantitative Risk Management: Concepts, Techniques and Tools},
+ year = {2015},
+ isbn = {0691166277, 9780691166278},
+ publisher = {Princeton University Press},
+ address = {Princeton, NJ, USA},
+} 

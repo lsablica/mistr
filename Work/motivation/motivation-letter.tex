@@ -1,0 +1,36 @@
+\documentclass{article}
+\usepackage{hyperref}
+\usepackage[margin=3cm]{geometry}
+\title{\textbf{mistr: A Computational Framework for Mixture and Composite Distributions } \\ }
+\newcommand{\pkg}[1]{\textbf{\textsf{#1}}}
+\date{}
+\begin{document}
+\maketitle
+\pagenumbering{gobble}
+
+\noindent Dear editors,
+
+\vspace{0.25cm}
+\noindent  please consider for publication in {\it The R Journal} our manuscript titled ``mistr: A Computational Framework for Mixture and Composite Distributions''. This work describes much-needed research into finite mixtures and composite distributions and is well timed because of the fair amount of attention the composite models have gained in the actuarial loss modeling over the past years. Finite mixtures and composite distributions allow to model the probabilistic representation of data with more generality than simple distributions and are useful to consider in a wide range of applications.
+
+\vspace{0.25cm}
+\noindent  To offer a general framework for univariate distributions and for mixture and composite models in general, package \pkg{mistr} provides an extensible computational framework and is specifically designed to create such models, evaluate or even fit them. The article introduces \pkg{mistr} and illustrates with several examples how these distributions can be created and used. In addition, we provide and show functions for data modeling using two specific composite distributions as well as a numerical example where a composite distribution is estimated to describe the log-returns of selected stocks.
+
+\vspace{0.25cm}
+\noindent  Package \pkg{mistr} uses S3 object oriented system in R to treat a distribution as a variable and so is able to send it to a function or perform transformations on the random variable it represents. With such a system the package offers to go beyond simple density or CDF evaluation and adds other useful calls to take the distribution operations to the next level. This approach has already been used in the package \pkg{distr}, which provides a conceptual treatment of distributions by means of S4 classes. However, like many similar packages, to the best of our knowledge it does not support any tools to work with composite distributions. In particular, the only packages available for composite models are the \pkg{CompLognormal} package and the package \pkg{gendist}, which can only deal with two-components composite distributions.
+
+\vspace{0.25cm}
+\noindent The framework provided by package \pkg{mistr} currently supports all distributions that are included in the \pkg{stats} package and, in addition, it offers some extreme value distributions. These objects/distributions can be combined to define  the desired mixture and composite models which are the main aim of this package. Furthermore, \pkg{mistr} provides multiple methods specifically designed to describe and visualize the distributions or functions capable of fitting the two pre-defined composite distributions that are introduced in the last chapter. 
+
+\vspace{0.25cm}
+\noindent The package is additionally equipped with the possibility to extend the current list of known distributions and transformations by letting the user add these in a very simple way. Finally, we will keep adding multiple extensions and distributions to extend the generality even more.
+ 
+\vspace{0.25cm}
+\noindent  This manuscript has not been submitted elsewhere.
+
+\vspace{0.25cm}
+\noindent Sincerely,
+
+\noindent Lukas Sablica, Kurt Hornik
+
+\end{document}

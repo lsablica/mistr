@@ -1,0 +1,588 @@
+#' @title Creates an Object Representing Composite Distribution
+#' @description  \code{compdist} creates an object which represents the composite distribution.
+#' @param ... distribution objects.
+#' @param weights vector of weights for the components.
+#' @param breakpoints vector of breakpoints for the composite models, first and last breakpoints (\eqn{-\infty}, \eqn{\infty})
+#'                    are assumed to be given, and should not be specified.
+#' @param break.spec vector of breakpoints specifications with values "L" or "R", breakpoints specifications corresponding to
+#'                   \eqn{-\infty} and \eqn{\infty} should not be specified.
+#' @param all.left if TRUE, all break.spec are set to "L", default: FALSE.
+#' @param dist vector of distribution names.
+#' @param params list of parameters.
+#' @return Object of class compdist.
+#' @details A CDF of a composite distribution function is \deqn{F(A)=\sum w_{i}F_{i}(A|B_{i})}, where
+#'          \eqn{w_{i}} is the weight of the i-th component, \eqn{F_{i}()} is the CDF of the i-th component
+#'          and \eqn{B_{i}} is the interval specified by the breakpoints. Clearly, the composite models are a
+#'          specific case of the mixture models, where the corresponding probability distribution
+#'          functions are truncated to some disjoint support.
+#'
+#'          The objects can be specified in two ways, either the user may enter
+#'          objects representing distributions or a vector of names and list of parameters.
+#'          See the examples below.
+#'
+#'          The argument \code{break.spec} defines if the breakpoint should be included to the distribution
+#'          to the right ("R") or to the left ("L") of the breakpoint. This feature is of course useful
+#'          only in the case where at least one of the adjacent components is discrete. By default
+#'          the intervals are left-closed (all \code{break.spec} values are "R").
+#'
+#'          The function permits to use the same breakpoint twice. This possibility
+#'          allows to define a partition on a singleton, and hence to create a mass of probability.
+#'          If this feature is used, the break.spec needs to be specified with "R" and "L", for
+#'          the first and the second identical breakpoints, respectively, or not set at all.
+#'
+#' @examples
+#' # using the objects
+#' C <- compdist(normdist(1, 3), expdist(4), weights = c(0.7, 0.3), breakpoints = 2)
+#' C
+#'
+#' # using the names and parameters
+#' C2 <- compdist(c("norm","exp"), list(c(mean = 1, sd = 3), c(rate = 4)),
+#'               weights = c(0.7, 0.3), breakpoints = 2)
+#' C2
+#'
+#' # more complicated model where break.spec is useful
+#' C3 <- compdist(-GPDdist(1,0.15,0.7), normdist(-1,1), binomdist(5,0.5),
+#'               geomdist(0.3) + 2, weights = c(0.075, 0.425, 0.425, 0.075),
+#'               breakpoints = c(-2.5, 0,3), break.spec = c("L", "R", "R"))
+#' C3
+#'
+#' # same breakpoint twice
+#' C4 <-  compdist(-expdist(2),poisdist(),expdist(2),
+#'                 weights = c(0.25, 0.5, 0.25), breakpoints = c(0, 0))
+#' C4
+#' @export
+#' @rdname compdist
+#' @seealso \code{\link{mixdist}}
+compdist <- function(..., weights, breakpoints, break.spec, all.left = FALSE) UseMethod("compdist")
+
+
+findInterval2 <- function(x, vec, spec) {
+  if (all(spec == "L"))
+    return(findInterval(x, vec, left.open = TRUE))
+  if (all(spec == "R"))
+    return(findInterval(x, vec))
+  z <- numeric(length(x))
+  spec <- c(spec, "L")
+  l <- findInterval(x, vec)
+  r <- findInterval(x, vec, left.open = TRUE)
+  if (any(duplicated(vec))) {
+    l[(l - r) == 2] <- l[(l - r) == 2] - 1
+    r[(l - r) == 2] <- l[(l - r) == 2] - 1
+  }
+  for (i in unique(c(l[l > 0], r[r > 0]))) {
+    if (spec[i] == "R") {
+      if (spec[i + 1] == "R") {
+        # [)
+        z[l == i] <- i
+      } else {
+        # RL []
+        z[r == i | l == i] <- i
+      }
+    } else {
+      if (spec[i + 1] == "R") {
+        # ()
+        z[r == i & l == i] <- i
+      } else {
+        # (]
+        z[r == i] <- i
+      }
+    }
+  }
+  z
+}
+
+
+lambda <- function(obj, br, spc) {
+  c(0, unlist(lapply(2:length(obj), function(i) {
+    if (spc[i - 1] == "L") p(obj[[i]], br[i - 1]) else plim(obj[[i]], br[i - 1])
+  })))
+}
+
+rho <- function(obj, br, spc) {
+  c(unlist(lapply(1:(length(obj) - 1), function(i) {
+    if (spc[i] == "L") p(obj[[i]], br[i]) else plim(obj[[i]], br[i])
+  })), 1)
+}
+
+#' @rdname compdist
+#' @export
+compdist.dist <- function(..., weights, breakpoints, break.spec, all.left = FALSE) {
+  K <- list(...)
+  if (length(K) != length(weights))
+    stop("you need the same length of weights and distributions")
+  if (length(K) != (length(breakpoints) + 1))
+    stop("you need n-1 breakpoints")
+  if (any(duplicated(breakpoints[duplicated(breakpoints)])))
+    stop("same breakpoint can be used only once or twice")
+  if (sum(weights) != 1)
+    weights <- weights/sum(weights)
+  o <- order(breakpoints)
+  breakpoints <- breakpoints[o]
+  if (any(duplicated(breakpoints))) {
+    d <- duplicated(breakpoints)
+    if (!all.left && missing(break.spec)) {
+      interval <- rep.int("R", length(breakpoints))
+      interval[d] <- "L"
+    } else if (all.left && missing(break.spec)) {
+      interval <- rep.int("L", length(breakpoints))
+      interval[which(d) - 1] <- "R"
+    } else {
+      break.spec <- break.spec[o]
+      if (length(break.spec) != length(breakpoints))
+        stop("length of breakpoints and it's specification has to be equal")
+      if (any(break.spec != "R" & break.spec != "L"))
+        stop("break.spec has to be specified using \"L\" and \"R\"")
+      if (any(break.spec[d] == "R" | break.spec[which(d) - 1] == "L"))
+        stop("duplicated breakpoints need to be specified as R and L, otherwise there is no support for the distribution")
+      interval <- break.spec
+    }
+  } else {
+    if (!all.left && missing(break.spec)){
+      interval <- rep.int("R", length(breakpoints))
+    } else if (all.left && missing(break.spec)){
+      interval <- rep.int("L", length(breakpoints))
+    } else {
+      break.spec <- break.spec[o]
+      if (length(break.spec) != length(breakpoints))
+        stop("length of breakpoints and it's specification has to be equal")
+      if (any(break.spec != "R" & break.spec != "L"))
+        stop("break.spec has to be specified using \"L\" and \"R\"")
+      interval <- break.spec
+    }
+  }
+  x <- list(objects = K, weights = weights, breakpoints = breakpoints, interval = interval)
+  rhos <- rho(obj = K, br = breakpoints, spc = interval)
+  lambdas <- lambda(obj = K, br = breakpoints, spc = interval)
+  diff <- rhos - lambdas
+  if (any(diff == 0))
+    stop("all components need to have a positive support on the truncated interval")
+  x <- c(x, list(trunc = list(lambda = lambdas, rho = rhos, diff = diff)))
+  if (all(unlist(lapply(K, is.contin)))) {
+    class(x) <- c("contcompdist", "compdist", "univdist", "dist")
+  } else if (all(unlist(lapply(K, is.discrete)))) {
+    class(x) <- c("discrcompdist", "compdist", "univdist", "dist")
+  } else {
+    class(x) <- c("contdiscrcompdist", "compdist", "univdist", "dist")
+  }
+  x
+}
+#' @rdname compdist
+#' @export
+compdist.default <- function(dist, params, weights, breakpoints, break.spec, all.left = FALSE,...) {
+  if (length(dist) != length(weights))
+    stop("you need the same length of probabilities and distributions")
+  if (length(dist) != (length(breakpoints) + 1))
+    stop("you need n-1 breakpoints")
+  if (any(duplicated(breakpoints[duplicated(breakpoints)])))
+    stop("same breakpoint can be used only once or twice")
+  if (sum(weights) != 1)
+    weights <- weights/sum(weights)
+  K <- lapply(1:length(dist), function(i) {
+    D <- get(paste0(dist[i], "dist"), mode = "function")
+    do.call(D, as.list(params[[i]]))
+  })
+  o <- order(breakpoints)
+  breakpoints <- breakpoints[o]
+  if (any(duplicated(breakpoints))) {
+    d <- duplicated(breakpoints)
+    if (!all.left && missing(break.spec)) {
+      interval <- rep.int("R", length(breakpoints))
+      interval[d] <- "L"
+    } else if (all.left && missing(break.spec)) {
+      interval <- rep.int("L", length(breakpoints))
+      interval[which(d) - 1] <- "R"
+    } else {
+      break.spec <- break.spec[o]
+      if (length(break.spec) != length(breakpoints))
+        stop("length of breakpoints and it's specification has to be equal")
+      if (any(break.spec != "R" & break.spec != "L"))
+        stop("break.spec has to be specified using \"L\" and \"R\"")
+      if (any(break.spec[d] == "R" | break.spec[which(d) - 1] == "L"))
+        stop("duplicated breakpoints need to be specified as R and L, otherwise there is no support for the distribution")
+      interval <- break.spec
+    }
+  } else {
+    if (!all.left && missing(break.spec))
+      interval <- rep.int("R", length(breakpoints)) else if (all.left && missing(break.spec))
+        interval <- rep.int("L", length(breakpoints)) else {
+          break.spec <- break.spec[o]
+          if (length(break.spec) != length(breakpoints))
+            stop("length of breakpoints and it's specification has to be equal")
+          if (any(break.spec != "R" & break.spec != "L"))
+            stop("break.spec has to be specified using \"L\" and \"R\"")
+          interval <- break.spec
+        }
+  }
+  x <- list(objects = K, weights = weights, breakpoints = breakpoints, interval = interval)
+  rhos <- rho(obj = K, br = breakpoints, spc = interval)
+  lambdas <- lambda(obj = K, br = breakpoints, spc = interval)
+  diff <- rhos - lambdas
+  if (any(diff == 0))
+    stop("all components need to have a positive support on the truncated interval")
+  x <- c(x, list(trunc = list(lambda = lambdas, rho = rhos, diff = diff)))
+  
+  if (all(unlist(lapply(K, function(O) {
+    any(class(O) == "contdist")
+  })))) {
+    class(x) <- c("contcompdist", "compdist", "univdist", "dist")
+  } else if (all(unlist(lapply(K, function(O) {
+    any(class(O) == "discrdist")
+  })))) {
+    class(x) <- c("discrcompdist", "compdist", "univdist", "dist")
+  } else {
+    class(x) <- c("contdiscrcompdist", "compdist", "univdist", "dist")
+  }
+  x
+}
+
+#' @export
+print.compdist <- function(x, digits = 4, ...) {
+  Distribution <- numeric(length(x$objects))
+  Parameters <- numeric(length(x$objects))
+  mix <- unlist(lapply(x$objects, is.mixture), use.names = FALSE)
+  comp <- unlist(lapply(x$objects, is.composite), use.names = FALSE)
+  dist <- !(mix | comp)
+  Distribution[mix] <- "Mixture distribution"
+  Distribution[comp] <- "Composite distribution"
+  Distribution[dist] <- unlist(lapply(x$objects[dist], function(x) x$type), use.names = FALSE)
+  Trafo <- sapply(x$objects, function(x) {
+    if (is.transformed(x)) {
+      deparse(x$trafo$print)
+    } else "none"
+  })
+  Parameters[dist] <- unlist(lapply(x$objects[dist], function(x) {
+    paste(names(x$parameters), round(unlist(x$parameters), digits), sep = " = ", collapse = ", ")
+  }), use.names = FALSE)
+  Parameters[!dist] <- "   "
+  Weight <- round(x$weights, digits)
+  vv <- unlist(lapply(x$interval, function(x) if (x == "R")
+    c(")", "[") else c("]", "(")))
+  bre <- round(x$breakpoints, digits)
+  Truncation <- paste(c("(", vv[seq.int(1L, length(vv), 2L) + 1]), c("-Inf", bre), ",", c(bre, "Inf"), c(vv[seq.int(1L,
+                                                                                                                    length(vv), 2L)], ")"), sep = "")
+  if (any(Trafo != "none")) {
+    results <- data.frame(Trafo, Distribution, Parameters, Weight, Truncation)
+  } else {
+    results <- data.frame(Distribution, Parameters, Weight, Truncation)
+  }
+  name.width <- unlist(lapply(names(results), nchar), use.names = FALSE)
+  cat("Composite distribution with: \n \n")
+  print(format(results, width = name.width, justify = "centre"))
+  invisible(x)
+}
+
+#' @rdname d
+#' @export
+d.compdist <- function(O, x, log = FALSE) {
+  Z <- numeric(length(x))
+  nat <- is.na(x)
+  Z[nat] <- x[nat]
+  x <- x[!nat]
+  z <- numeric(length(x))
+  int <- findInterval2(x, O$breakpoints, O$interval) + 1
+  un <- sort(unique(int))
+  dif <- O$trunc$diff[un]
+  if (log) {
+    for (j in seq_along(un)) {
+      i <- un[j]
+      z[int == i] <- log(O$weights[i]) + d(O$objects[[i]], x[int == i], log = TRUE) - log(dif[j])
+    }
+  } else {
+    for (j in seq_along(un)) {
+      i <- un[j]
+      z[int == i] <- O$weights[i] * d(O$objects[[i]], x[int == i])/dif[j]
+    }
+  }
+  Z[!nat] <- z
+  Z
+}
+
+#' @rdname p
+#' @export
+p.compdist <- function(O, q, lower.tail = TRUE, log.p = FALSE) {
+  Z <- numeric(length(q))
+  nat <- is.na(q)
+  Z[nat] <- q[nat]
+  q <- q[!nat]
+  z <- numeric(length(q))
+  w <- cumsum(c(0, O$weights))
+  int <- findInterval2(q, O$breakpoints, O$interval) + 1
+  un <- sort(unique(int))
+  lam <- O$trunc$lambda[un]
+  dif <- O$trunc$diff[un]
+  for (j in seq_along(un)) {
+    i <- un[j]
+    z[int == i] <- w[i] + O$weights[i] * (p(O$objects[[i]], q[int == i]) - lam[j])/dif[j]
+  }
+  Z[!nat] <- z
+  if (!lower.tail)
+    Z <- 1 - Z
+  if (log.p)
+    log(Z) else Z
+}
+#' @rdname plim
+#' @export
+plim.compdist <- function(O, q, lower.tail = TRUE, log.p = FALSE) {
+  w <- cumsum(c(0, O$weights))
+  Z <- numeric(length(q))
+  nat <- is.na(q)
+  Z[nat] <- q[nat]
+  q <- q[!nat]
+  z <- numeric(length(q))
+  int <- findInterval(q, O$breakpoints, left.open = TRUE) + 1
+  un <- sort(unique(int))
+  lam <- O$trunc$lambda[un]
+  dif <- O$trunc$diff[un]
+  for (j in seq_along(un)) {
+    i <- un[j]
+    z[int == i] <- w[i] + O$weights[i] * (plim(O$objects[[i]], q[int == i]) - lam[j])/dif[j]
+  }
+  Z[!nat] <- z
+  if (!lower.tail)
+    Z <- 1 - Z
+  if (log.p)
+    log(Z) else Z
+}
+#' @rdname q
+#' @export
+q.compdist <- function(O, p, lower.tail = TRUE, log.p = FALSE, ...) {
+  Z <- numeric(length(p))
+  nat <- is.na(p)
+  Z[nat] <- p[nat]
+  p <- p[!nat]
+  z <- numeric(length(p))
+  if (log.p)
+    p <- exp(p)
+  if (!lower.tail)
+    p <- 1 - p
+  ok <- p >= 0 & p <= 1
+  p <- p[ok]
+  zz <- numeric(length(p))
+  zz[p == 1] <- unname(sudo_support(O)[2])
+  zz[p == 0] <- unname(sudo_support(O)[1])
+  supp <- p > 0 & p < 1
+  p <- p[supp]
+  zzz <- numeric(length(p))
+  w <- cumsum(c(0, O$weights))
+  int <- findInterval(p, w, left.open = TRUE)
+  un <- sort(unique(int))
+  lam <- O$trunc$lambda[un]
+  dif <- O$trunc$diff[un]
+  for (j in seq_along(un)) {
+    i <- un[j]
+    zzz[int == i] <- q(O$objects[[i]], lam[j] + ((p[int == i] - w[i]) * dif[j])/O$weights[i])
+  }
+  zz[supp] <- zzz
+  z[ok] <- zz
+  z[!ok] <- NaN
+  Z[!nat] <- z
+  Z
+}
+#' @rdname qlim
+#' @export
+qlim.compdist <- function(O, p, lower.tail = TRUE, log.p = FALSE) {
+  Z <- numeric(length(p))
+  nat <- is.na(p)
+  Z[nat] <- p[nat]
+  p <- p[!nat]
+  z <- numeric(length(p))
+  if (log.p)
+    p <- exp(p)
+  if (!lower.tail)
+    p <- 1 - p
+  ok <- p >= 0 & p <= 1
+  p <- p[ok]
+  zz <- numeric(length(p))
+  zz[p == 1] <- unname(sudo_support(O)[2])
+  zz[p == 0] <- unname(sudo_support(O)[1])
+  supp <- p > 0 & p < 1
+  p <- p[supp]
+  zzz <- numeric(length(p))
+  w <- cumsum(c(0, O$weights))
+  int <- findInterval(p, w)
+  un <- sort(unique(int))
+  lam <- O$trunc$lambda[un]
+  dif <- O$trunc$diff[un]
+  for (j in seq_along(un)) {
+    i <- un[j]
+    zzz[int == i] <- qlim(O$objects[[i]], lam[j] + ((p[int == i] - w[i]) * dif[j])/O$weights[i])
+  }
+  zz[supp] <- zzz
+  z[ok] <- zz
+  z[!ok] <- NaN
+  Z[!nat] <- z
+  Z
+}
+#' @rdname r
+#' @export
+r.compdist <- function(O, n) {
+  if (any(sapply(O$objects, is.mixture)))
+    r2(O, n) else q(O, runif(n))
+}
+
+r2 <- function(O, n) {
+  Z <- numeric(n)
+  l <- length(O$objects)
+  t <- sample(l, replace = TRUE, n, prob = O$weights)
+  v <- unlist(lapply(1:l, function(x) sum(t == x)), use.names = FALSE)
+  lam <- O$trunc$lambda
+  dif <- O$trunc$diff
+  lapply(1:l, function(i) {
+    if (is.mixture(O$objects[[i]])) {
+      h <- numeric(v[i])
+      n <- 0
+      num <- min(round(2 * v[i]/dif[i]), 1e+07)
+      while (n < v[i]) {
+        o <- r(O$objects[[i]], num)
+        int <- findInterval2(o, O$breakpoints, O$interval) + 1
+        good <- o[int == i]
+        tt <- length(good)
+        if (tt == 0)
+          next
+        if (tt + n > v[i]) {
+          h[(n + 1):v[i]] <- good[1:(v[i] - n)]
+          n <- v[i]
+        } else {
+          h[(n + 1):(n + tt)] <- good
+          n <- n + tt
+        }
+      }
+      Z[t == i] <<- h
+    } else {
+      Z[t == i] <<- q(O$objects[[i]], lam[i] + runif(v[i]) * dif[i])
+    }
+  })
+  Z
+}
+
+#' @export
+print.trans_compdist <- function(x, digits = 4, ...) {
+  Distribution <- numeric(length(x$objects))
+  Parameters <- numeric(length(x$objects))
+  mix <- unlist(lapply(x$objects, is.mixture), use.names = FALSE)
+  comp <- unlist(lapply(x$objects, is.composite), use.names = FALSE)
+  dist <- !(mix | comp)
+  Distribution[mix] <- "Mixture distribution"
+  Distribution[comp] <- "Composite distribution"
+  Distribution[dist] <- unlist(lapply(x$objects[dist], function(x) x$type), use.names = FALSE)
+  Trafo <- sapply(x$objects, function(x) {
+    if (is.transformed(x)) {
+      deparse(x$trafo$print)
+    } else "none"
+  })
+  Parameters[dist] <- unlist(lapply(x$objects[dist], function(x) {
+    paste(names(x$parameters), round(unlist(x$parameters), digits), sep = " = ", collapse = ", ")
+  }), use.names = FALSE)
+  Parameters[!dist] <- "   "
+  Weight <- round(x$weights, digits)
+  vv <- unlist(lapply(x$interval, function(x) if (x == "R")
+    c(")", "[") else c("]", "(")))
+  bre <- round(x$breakpoints, digits)
+  Truncation <- paste(c("(", vv[seq.int(1L, length(vv), 2L) + 1]), c("-Inf", bre), ",", c(bre, "Inf"), c(vv[seq.int(1L,
+                                                                                                                    length(vv), 2L)], ")"), sep = "")
+  if (any(Trafo != "none")) {
+    results <- data.frame(Trafo, Distribution, Parameters, Weight, Truncation)
+  } else {
+    results <- data.frame(Distribution, Parameters, Weight, Truncation)
+  }
+  name.width <- unlist(lapply(names(results), nchar), use.names = FALSE)
+  cat("Monotonically transformed composite distribution with: \n \n")
+  cat("Trafo: ", deparse(x$trafo$print), "\n \n")
+  print(format(results, width = name.width, justify = "centre"))
+  invisible(x)
+}
+
+change_support <- function(O, sup) UseMethod("change_support")
+#' @export
+change_support.standist <- function(O, sup) {
+  sup <- sort(sup)
+  if (O$support$to < sup[1] || O$support$from > sup[2]) {
+    O$support$from <- sup[1]
+    O$support$to <- sup[2]
+  } else {
+    O$support$from <- max(sup[1], O$support$from)
+    O$support$to <- min(sup[2], O$support$to)
+  }
+  O
+}
+#' @export
+change_support.trans_standist <- function(O, sup) {
+  sup <- sort(eval(O$trafo$invtrans, list(X = sup)))
+  if (O$support$to < sup[1] || O$support$from > sup[2]) {
+    O$support$from <- sup[1]
+    O$support$to <- sup[2]
+  } else {
+    O$support$from <- max(sup[1], O$support$from)
+    O$support$to <- min(sup[2], O$support$to)
+  }
+  O
+}
+#' @export
+change_support.mixdist <- function(O, sup) {
+  O$objects <- lapply(O$objects, change_support, sup)
+  O
+}
+#' @export
+change_support.trans_mixdist <- function(O, sup) {
+  sup <- sort(eval(O$trafo$invtrans, list(X = sup)))
+  O$objects <- lapply(O$objects, change_support, sup)
+  O
+}
+#' @export
+change_support.compdist <- function(O, sup) {
+  O$objects <- lapply(O$objects, change_support, sup)
+  O
+}
+#' @export
+change_support.trans_compdist <- function(O, sup) {
+  sup <- sort(eval(O$trafo$invtrans, list(X = sup)))
+  O$objects <- lapply(O$objects, change_support, sup)
+  O
+}
+
+
+#' @rdname d
+#' @export
+d.trans_compdist <- function(O, x, log = FALSE) {
+  Z <- numeric(length(x))
+  nat <- is.na(x)
+  Z[nat] <- x[nat]
+  x <- x[!nat]
+  zz <- numeric(length(x))
+  r <- x >= sudo_support(O)[1] & x <= sudo_support(O)[2]
+  x <- x[r]
+  z <- numeric(length(x))
+  sup <- eval(O$trafo$invtrans, list(X = sudo_support(O)))
+  if (monot(O) == 1) {
+    spec <- O$interval
+    obj <- lapply(O$objects, function(x) eval(O$trafo$print, list(X = change_support(x, sup))))
+    weigh <- O$weights
+    dif <- O$trunc$diff
+  } else {
+    spec <- sapply(rev(O$interval), function(x) if (x == "L")
+      "R" else "L")
+    obj <- lapply(rev(O$objects), function(x) eval(O$trafo$print, list(X = change_support(x, sup))))
+    dif <- rev(O$trunc$diff)
+    weigh <- rev(O$weights)
+  }
+  breakp <- sort(round(eval(O$trafo$trans, list(X = O$breakpoints)), 14))
+  int <- findInterval2(x, breakp, spec) + 1
+  un <- sort(unique(int))
+  dif <- dif[un]
+  if (log) {
+    for (j in seq_along(un)) {
+      i <- un[j]
+      z[int == i] <- log(weigh[i]) + d(obj[[i]], x[int == i], log = TRUE) - log(dif[j])
+    }
+    zz[r == 1] <- z
+    zz[r != 1] <- -Inf
+  } else {
+    for (j in seq_along(un)) {
+      i <- un[j]
+      z[int == i] <- weigh[i] * d(obj[[i]], x[int == i])/dif[j]
+    }
+    zz[r == 1] <- z
+  }
+  Z[!nat] <- zz
+  Z
+}

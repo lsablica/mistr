@@ -1,0 +1,27 @@
+{
+    "id": "281018F6",
+    "path": "~/Documents/repo/mistr/man/stocks.Rd",
+    "project_path": "man/stocks.Rd",
+    "type": "r_doc",
+    "hash": "4072452806",
+    "contents": "",
+    "dirty": false,
+    "created": 1606140392211.0,
+    "source_on_save": false,
+    "relative_order": 16,
+    "properties": {
+        "cursorPosition": "0,0",
+        "scrollLine": "0",
+        "Source": "Source"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1639825519,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1639825519,
+    "read_only": true,
+    "read_only_alternatives": [
+        "R/data.R"
+    ]
+}

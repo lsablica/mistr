@@ -1,0 +1,124 @@
+## This file contains the source code that was used to generate the article.
+## The code and the results are discussed in the article.
+
+# Introduction example
+## generating SAP density and Q-Q plot
+library(mistr)
+v = 4
+op <- par(mfrow = c(1, 2), mar = c(v,v/2,v/2,2*v))
+
+plot(density(stocks$SAP), xlim = c(-0.07, 0.07), xlab = "", ylab = "", main = "", cex.axis = 0.75)
+title(main= "Density of SAP log-returns
+     and normal distribution ", cex.main=0.75)
+x <- seq(-0.07, 0.07, 0.001)
+lines(x, dnorm(x, mean(stocks$SAP), sd(stocks$SAP)), col = "red")
+legend("topright", legend = c("SAP", "Normal"), col = c(1, 2), lty = 1, cex = 0.5)
+op <- par(mfrow = c(1, 2), mar = c(v,2*v,v/2,v/2))
+qqnorm(stocks$SAP, xlab = "", ylab = "", main = "", cex.axis = 0.75)
+qqline(stocks$SAP)
+title(main= "Normal Q-Q Plot", cex.main=0.75)
+
+par(op)
+
+
+# Computational framework
+N <- normdist(mean = 1, sd = 3) # creates normal distribution with mean = 1 and sd = 3
+N                               # prints the distreibution
+
+d(N, c(1, 2, 3))                # PDF evaluation
+p(N, c(1, 2, 3))                # CDF evaluation
+q(N, c(0.1, 0.2, 0.3))          # QF evaluation
+r(N, 3)                         # random numbers generation
+
+B <- binomdist(size = 12, prob = 0.3)   # creates binomial distribution
+plim(B, c(-3, 0, 3, 12))                # left-hand limit of PDF evaluation
+qlim(B, plim(B, c(0, 3, 7, 12)))        # pseudo-inverse of of plim evaluation
+
+# Adding transformation
+E <- expdist(2)                 # creates exponential distribution
+E * 2                           # performs transformation
+E^2                             # performs transformation
+
+E2 <- E * -2                    # performs transformation
+E3 <- E2 * 5                    # performs transformation
+E3                              # prints the distreibution
+
+Norm_trafo <- (N - 1)^(1/3)     # performs transformation
+Norm_trafo                      # prints the distreibution
+
+Binom_trafo <- -3 * log(B + 4)        # performs transformation
+q(Binom_trafo, c(0.05, 0.5, 0.95))    # QF evaluation
+plim(Binom_trafo, c(-6, -5, 0))       # left-hand limit of PDF evaluation
+sudo_support(Binom_trafo)             # prints the range of the support
+
+par(mai = c(0.4, 0.4, 0.2, 0.2))
+plot(Norm_trafo, xlim1 = c(-2.5, 2.5), ylab1 = "", cex.axis = 0.75)    # PDF and CDF plot of the Norm_trafo object
+
+library(ggplot2) # autoplot requires ggplot2
+autoplot(Norm_trafo, xlim1 = c(-2.5, 2.5))                             # PDF and CDF plot of the Norm_trafo object using ggplot2
+
+QQplotgg(Norm_trafo, r(Norm_trafo, 1000), conf = 0.99, ylab = NULL, xlab = NULL)   # Q-Qplot of Norm_trafo against its sample
+
+# Mixtures
+mixdist(c("norm", "unif"), list(c(2, 2), c(1, 5)), weights = c(0.5, 0.5))        # creates mixture distribution
+
+M <- mixdist(Norm_trafo, Binom_trafo, expdist(0.5), weights = c(0.4, 0.2, 0.4))  # combines objects into mixture distribution
+
+DM <- mixdist(3 * binomdist(12, 0.4), -2*poisdist(2) + 12, weights=c(0.5, 0.5))  # following code was used to test the QF of the mixture distribution
+y <- c(0.05, 0.4, p(-DM, c(-5, -10, -15)), 0.95)
+x <- q(-DM, y)
+autoplot(-DM, which = "cdf", only_mix = TRUE, xlim1 = c(-37, 0)) +
+  annotate("point", x, y, col = "white")
+
+sudo_support(M)                       # prints the range of the support
+
+M_trans <- -2 * (M)^(1/3)             # performs transformation
+r(M_trans, 4)                         # random numbers generation
+
+autoplot(M_trans)                      # PDF and CDF plot of the M_trans object using ggplot2
+
+# Composite distributions
+C <- compdist(-paretodist(1, 1), normdist(0, 2), geomdist(0.3) + 2,           # creates composite distribution
+              weights = c(0.15, 0.7, 0.15), breakpoints = c(-3, 3),
+              break.spec = c("L", "R"))
+C                                                                             # prints the distreibution
+
+C2 <- compdist(-expdist(2), poisdist(), expdist(2),                           # creates composite distribution
+               weights = c(0.25, 0.5, 0.25), breakpoints = c(0, 0))
+C2                                                                            # prints the distreibution
+
+par(mai = c(0.4, 0.4, 0.2, 0.2))
+plot(C, xlim1 = c(-15, 15), ylab1 = "", cex.axis = 0.75, mtext_cex = 0.75)    # PDF and CDF plot of the C object
+
+autoplot(C2, text_ylim = 0.01)                                                # PDF and CDF plot of the C2 object using ggplot2
+
+C_trans <- -0.5 * (C + 7)                                                     # performs transformation
+
+q(C_trans, c(0.075, 0.5, 0.7, 0.9))                                           # QF evaluation
+r(C_trans, 4)                                                                 # random numbers generation
+
+autoplot(C_trans, xlim1 = c(-10,5))                                           # PDF and CDF plot of the C_trans object using ggplot2
+
+# Combining mixture and composite distributions
+C3 <- compdist(M_trans - 3, C_trans, weights = c(0.5, 0.5), breakpoints = -4.5)        # creates composite distribution
+C3_trans <- -2 * C3 + 2                                                                # performs transformation
+
+plim(C3_trans, c(6, 10, 12))                                                           # left-hand limit of PDF and its pseudo-inverse evaluation
+qlim(C3_trans, c(0.3, 0.5, 0.7))
+
+autoplot(C3_trans, xlim1 = c(0,20), text_ylim = 0.01, grey = TRUE)                     # PDF and CDF plot of the C3_trans object using ggplot2
+
+autoplot(mixdist( C3_trans, C2 + 5, weights = c(0.7, 0.3)), xlim1 = c(0, 15))          # PDF and CDF plot of the created mixture object using ggplot2
+
+# Data modeling
+PNP_model <- PNP_fit(stocks$SAP)                             # estimates PNP model
+PNP_model                                                    # prints PNP model
+
+plot(PNP_model, ylab1 = "", ylab2 = "")                      # PDF, CDF and QQ plot of the PNP model
+
+GNG_model <- GNG_fit(stocks$SAP)                             # estimates GNG model
+GNG_model                                                    # prints GNG model
+
+autoplot(GNG_model)                                          # PDF, CDF and QQ plot of the GNG model using ggplot2
+
+risk(GNG_model, c(0.02, 0.05, 0.07, 0.1, 0.2, 0.3))          # calculates risk measures of the GNG model for the levels 0.02, 0.05, 0.07, 0.1, 0.2, 0.3

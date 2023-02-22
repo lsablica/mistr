@@ -1,0 +1,1032 @@
+#' @title Support Interval of Distribution Object
+#' @description  \code{sudo_support} is a generic function that returns the two boundary values
+#'               of object's support.
+#' @param O distribution object.
+#' @return Named vector containing two values.
+#' @details Methods of \code{sudo_support} function calculate the support's boundary
+#'          values for any distribution in the package \code{\link{mistr}}. This technique
+#'          is particularly useful when dealing with a transformed distribution.
+#' @examples
+#' B  <- binomdist(10, 0.3)
+#' sudo_support(B)
+#'
+#' B2 <- -3*log(B)
+#' sudo_support(B2)
+#'
+#' sudo_support( mixdist(B2, normdist(), weights = c(0.5, 0.5)))
+#' @rdname sudo_support
+#' @export
+sudo_support <- function(O) UseMethod("sudo_support")
+#' @rdname sudo_support
+#' @export
+sudo_support.discrdist <- function(O) {
+    k <- unlist(O$support[1:2])
+    names(k) <- c("From", "To")
+    k
+}
+#' @rdname sudo_support
+#' @export
+sudo_support.contdist <- function(O) {
+    k <- unlist(O$support)
+    names(k) <- c("From", "To")
+    k
+}
+#' @rdname sudo_support
+#' @export
+sudo_support.mixdist <- function(O) {
+    k <- range(unlist(lapply(O$objects, function(O) {
+        sudo_support(O)
+    })))
+    names(k) <- c("From", "To")
+    k
+}
+#' @rdname sudo_support
+#' @export
+sudo_support.compdist <- function(O) {
+    k <- c(sudo_support(O$objects[[1]])[1], sudo_support(O$objects[[length(O$objects)]])[2])
+    names(k) <- c("From", "To")
+    k
+}
+#' @rdname sudo_support
+#' @export
+sudo_support.trans_univdist <- function(O) {
+    k <- sort(eval(O$trafo$trans, list(X = sudo_support(untrafo(O)))))
+    names(k) <- c("From", "To")
+    k
+}
+
+
+
+
+
+#' @title Monotonicity of Transformation
+#' @description Function checks whether the transformation is increasing or decreasing.
+#' @param O transforms distribution object.
+#' @return 1 for increasing and -1 for decreasing.
+#' @rdname monot
+#' @export
+monot <- function(O) UseMethod("monot")
+#' @rdname monot
+#' @export
+monot.trans_univdist <- function(O) {
+    t = eval(O$trafo$trans, list(X = sudo_support(untrafo(O))))
+    if (all(sort(t) == t)) {
+        1
+    } else {
+        -1
+    }
+}
+
+support_sign <- function(O) UseMethod("support_sign")
+#' @export
+support_sign.dist <- function(O) {
+    k <- sudo_support(O)
+    if (k[1] >= 0) {
+        return(1)
+    }
+    if (k[2] <= 0) {
+        return(-1)
+    }
+    0
+}
+#' @title Untransformation of a Distribution Object
+#' @description  \code{untrafo} is a generic function that returns the untransformed random variable, if a transformed object
+#'               is given.
+#' @param O transformed distribution object.
+#' @return Untransformed distribution object.
+#' @examples
+#' B  <- binomdist(10, 0.3)
+#' B2 <- -3*log(B)
+#' B2
+#'
+#' untrafo(B2)
+#' @rdname untrafo
+#' @export
+untrafo <- function(O) UseMethod("untrafo")
+#' @rdname untrafo
+#' @export
+untrafo.trans_standist <- function(O) {
+    class(O) <- c(O$trafo$dist, sapply(class(O)[1:3], function(z) unlist(strsplit(z, "trans_"))[2], USE.NAMES = FALSE), "dist")
+    O$trafo <- NULL
+    O
+}
+#' @rdname untrafo
+#' @export
+untrafo.trans_mixdist <- function(O) {
+    class(O) <- c(sapply(class(O)[1:3], function(z) unlist(strsplit(z, "trans_"))[2], USE.NAMES = FALSE), "dist")
+    O$trafo <- NULL
+    O
+}
+#' @rdname untrafo
+#' @export
+untrafo.trans_compdist <- function(O) {
+    class(O) <- c(sapply(class(O)[1:3], function(z) unlist(strsplit(z, "trans_"))[2], USE.NAMES = FALSE), "dist")
+    O$trafo <- NULL
+    O
+}
+
+
+substitute_q <- function(x, env) {
+    call <- substitute(substitute(y, env), list(y = x))
+    eval(call)
+}
+
+add_history <- function(O, his2) {
+    O$trafo$history <- mapply(c, O$trafo$history, his2, SIMPLIFY = FALSE)
+    O
+}
+del_last_history <- function(O) {
+    h <- length(O$trafo$history$expre)
+    if (h == 1) {
+        O <- untrafo(O)
+    } else {
+        k <- lapply(seq_along(O$trafo$history), function(i) O$trafo$history[[i]][-h])
+        names(k) <- names(O$trafo$history)
+        O$trafo$history <- k
+    }
+    O
+}
+#' @title Returns the Last Element from History List
+#' @description Function returns the last element from history list.
+#' @param O transformed distribution object.
+#' @param t which characterization should be extracted.
+#' @return Expression if t is set to "expre", "iexpre", "oldprint" and "oldderiv". 
+#'         Numeric and string if t is equal to "value" and "operation", respectively.
+#' @examples
+#' B  <- binomdist(10, 0.3)
+#' B2 <- -3*log(B)
+#' last_history(B2, "value")
+#' last_history(B2, "operation")
+#' @rdname last_history
+#' @export
+last_history <- function(O, t) {
+    O$trafo$history[[t]][[length(O$trafo$history$expre)]]
+}
+update_last_history <- function(O, val) {
+    h <- length(O$trafo$history$expre)
+    O$trafo$history$value[h] <- val
+    O
+}
+
+#' @title Modifications of Transformations
+#' @description The function modifies the given object and adds the transformation expressions.
+#' @param O distribution object.
+#' @param type type of modification to be performed, default: 'new'.
+#' @param trans transformation expression.
+#' @param invtrans inverse transformation expression.
+#' @param print print expression.
+#' @param deriv derivative expression.
+#' @param operation string indicating which operation is performed.
+#' @param value numeric value used in operation, default: 0.
+#' @return Transformed distribution object.
+#' @details \code{trafo} is the main function used in the transformation framework. The function
+#'          offers four types of possible modifications. Note, that all expressions must use X to indicate the object in the transformation.
+#'          
+#'          \strong{type = "init"}: Initializes the needed lists for transformations and adds the first expressions.
+#'          This type should be used only with yet untransformed distributions as the first modification. All arguments must be set.
+#'          
+#'          \strong{type = "new"}: Adds a new transformation to the current ones. 
+#'          This must be used only on already transformed distributions. All arguments must be set.
+#'          
+#'          \strong{type = "update"}: Updates previous expression. This is useful when same transformation is used twice in a row.
+#'          All arguments except operation must be set.
+#'          
+#'          \strong{type = "go_back"}: Uses to history to reverse the previous transformation. 
+#'          Useful if inverse of previous transformation is evaluated. Only object and type must be specified.
+#'          
+#' @examples 
+#' #init
+#' P <- poisdist(5) ; x <- 5
+#' P2 <- trafo(P, type = "init", trans = bquote(X + .(x)),
+#'             invtrans = bquote(X - .(x)), print = bquote(X + .(x)),
+#'             deriv = quote(1), operation = "+", value = x)
+#' P2
+#' 
+#' #new
+#' x = 3
+#' P3 <- trafo(P2, type = "new", trans = bquote(.(x) * X),
+#'             invtrans = bquote(X/.(x)), print = bquote(.(x) * X),
+#'             deriv = bquote(1/.(x)), operation = "*", value = x)
+#' P3
+#' 
+#' #update
+#' x = 7 
+#' P4 <- trafo(P3, type = "update", trans = bquote(.(x) * X),
+#'             invtrans = bquote(X/.(x)), print = bquote(.(x) * X),
+#'             deriv = bquote(1/.(x)), value = x)
+#' P4
+#' 
+#' #go_back
+#' P5 <- trafo(P4, type = "go_back")
+#' P5
+#' @rdname trafo
+#' @export 
+trafo <- function(O, type = "new", trans, invtrans, print, deriv, operation, value = 0){
+  if(!is.transformed(O)) type = "init"
+  if(type == "init"){
+    trafo = list(dist = class(O)[1], trans = trans, print = print, invtrans = invtrans, deriv = deriv)
+    trafo$history <-  list(expre = list(quote(X)), iexpre = list(quote(X)), operation = list(operation), value = list(value),
+                           oldprint = list(quote(X)), oldderiv = list(quote(1))) 
+    U <- c(O, trafo = list(trafo))
+    class(U) <- trans_class(O)
+    return(U)
+  } else if(type == "new"){
+    O <- add_history(O, list(O$trafo$trans, O$trafo$invtrans, operation, value, O$trafo$print, O$trafo$deriv))
+    O$trafo$trans <- substitute_q(trans, list(X = O$trafo$trans))
+    O$trafo$invtrans <- substitute_q(O$trafo$invtrans, list(X = invtrans))
+    O$trafo$print <- substitute_q(print, list(X = O$trafo$print)) 
+    O$trafo$deriv <- bquote(.(substitute_q(O$trafo$deriv, list(X = invtrans)))*.(deriv))
+    return(O)
+  } else if(type == "update"){
+    O$trafo$trans <- substitute_q(trans, list(X = last_history(O, 1))) 
+    O$trafo$invtrans <- substitute_q(last_history(O, 2), list(X = invtrans))
+    O$trafo$print <- substitute_q(print, list(X = last_history(O, 5))) 
+    O$trafo$deriv <- bquote(.(substitute_q(last_history(O, 6), list(X = invtrans)))*.(deriv))
+    O <- update_last_history(O, value)
+    return(O)
+  } else if(type == "go_back"){
+    O$trafo$trans <- last_history(O, 1)
+    O$trafo$invtrans <- last_history(O, 2)
+    O$trafo$print <- last_history(O, 5)
+    O$trafo$deriv <- last_history(O, 6)
+    O <- del_last_history(O)
+    return(O)
+  } else{
+    stop("not recognized type")
+  }
+}
+
+
+trans_class <- function(O) UseMethod("trans_class")
+#' @export
+trans_class.standist <- function(O) c(paste("trans_", class(O)[2:4], sep = ""), "dist")
+#' @export
+trans_class.mixdist <- function(O) c(paste("trans_", class(O)[1:3], sep = ""), "dist")
+#' @export
+trans_class.compdist <- function(O) c(paste("trans_", class(O)[1:3], sep = ""), "dist")
+
+#' @title Transformation of a Distribution Object
+#' @description The methods for arithmetic operators \code{+, -, *, /, ^, log, exp, sqrt}, which perform
+#'              a transformation of a given random variable.
+#' @param e1 distribution object or numeric of length one.
+#' @param e2 distribution object or numeric of length one.
+#' @param x  distribution object.
+#' @param base  a positive number: the base with respect to which logarithms are computed.
+#' @return Object representing a transformed random variable.
+#' @details The offered arithmetic operators \code{+, -, *, /, ^, log, exp, sqrt} create
+#'          an object that represents transformed random variable.
+#'
+#'          The functions, using the expressions manipulation, prepare expressions for
+#'          transformation, inverse transformation, derivative of the inverse transformation
+#'          and print. These expressions are then used later when the distribution is evaluated.
+#'
+#'          The transformation framework also keeps track on history of the transformations and so
+#'          is able to recognize some inverse transformations of previous transformations or update
+#'          the last transformation.
+#
+#'          Additionally, the methods are able to recognize some invariant and direct transformations,
+#'          and so rather change the parameters or distribution family than to loose this
+#'          information.
+#' @examples
+#' # transformation
+#' B  <- binomdist(10, 0.3)
+#' B2 <- - 3*log(B)
+#' B2
+#'
+#' # invariant transformation
+#' N  <- normdist(1, 3)
+#' N2 <- - 3*N + 5
+#' N2
+#'
+#' # direct transformation
+#' N3 <- exp(N2)
+#' N3
+#'
+#' # recognize inverse
+#' B3 <- exp(B2/-3)
+#' B3
+#' # update
+#' B4 <- B + 5
+#' B4 + 3
+#'
+#' @rdname distrafo
+#' @name Distribution_transformation
+NULL
+#' @rdname distrafo
+#' @export
+`+.univdist` <- function(e1, e2 = NULL) {
+    if (is.null(e2)) return(e1)
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2
+    } else {
+        O <- e2
+        x <- e1
+    }
+    if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+    if (x == 0) { 
+      return(O) 
+    } else if (x > 0) {
+       return(trafo(O, type = "init", trans = bquote(X + .(x)), invtrans = bquote(X - .(x)),
+                 print = bquote(X + .(x)), deriv = quote(1), operation = "+", value = x))
+    } else {
+       return(trafo(O, type = "init", trans = bquote(X - .(abs(x))), invtrans = bquote(X +.(abs(x))),
+                 print = bquote(X - .(abs(x))), deriv = quote(1), operation = "+", value = x))
+    }
+}
+#' @rdname distrafo
+#' @export
+`+.trans_univdist` <- function(e1, e2 = NULL) {
+    if (is.null(e2)) return(e1)
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2
+    } else {
+        O <- e2
+        x <- e1
+    }
+    if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+    if (x == 0) return(O)
+    if (last_history(O, 3) == "+") {
+        z <- last_history(O, 4) + x
+        if (z > 0) {
+           return(trafo(O, type = "update", trans = bquote(X + .(z)), invtrans = bquote(X - .(z)),
+                      print = bquote(X + .(z)), deriv = quote(1), value = z))
+        } else if (z == 0) {
+           return(trafo(O, type = "go_back"))
+        } else {
+           return(trafo(O, type = "update", trans = bquote(X - .(abs(z))), invtrans = bquote(X +.(abs(z))),
+                      print = bquote(X - .(abs(z))), deriv = quote(1), value = z))
+        }
+    } else {
+        if (x > 0) {
+           return(trafo(O, type = "new", trans = bquote(X + .(x)), invtrans = bquote(X - .(x)),
+                      print = bquote(X + .(x)), deriv = quote(1), operation = "+", value = x))
+        } else if (x < 0) {
+           return(trafo(O, type = "new", trans = bquote(X - .(abs(x))), invtrans = bquote(X +.(abs(x))),
+                      print = bquote(X - .(abs(x))), deriv = quote(1), operation = "+", value = x))
+        }
+    }
+}
+#' @rdname distrafo
+#' @export
+`*.univdist` <- function(e1, e2) {
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2
+    } else {
+        O <- e2
+        x <- e1
+    }
+    if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+    if (x == 0) return(0)
+    if (x == 1) return(O)
+    if (abs(x) > 1) {
+       return(trafo(O, type = "init", trans = bquote(.(x) * X), invtrans = bquote(X/.(x)),
+                  print = bquote(.(x) * X), deriv = bquote(1/.(x)), operation = "*", value = x))
+    } else if (x == -1) {
+       return(trafo(O, type = "init", trans =  quote(-X), invtrans = quote(-X),
+                  print = quote(-X), deriv = quote(-1), operation = "*", value = x))
+    } else {
+       return(trafo(O, type = "init", trans = bquote(X/.(1/x)), invtrans = bquote(.(1/x) * X),
+                  print = bquote(X/.(1/x)), deriv = bquote(1/.(x)), operation = "*", value = x))
+    }
+}
+#' @rdname distrafo
+#' @export
+`*.trans_univdist` <- function(e1, e2) {
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2
+    } else {
+        O <- e2
+        x <- e1
+    }
+    if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+    if (x == 1) return(O)
+    if (x == 0) return(0)
+    if (last_history(O, 3) == "*") {
+        z <- last_history(O, 4) * x
+        if (abs(z) > 1) {
+           return(trafo(O, type = "update", trans = bquote(.(z) * X), invtrans = bquote(X/.(z)),
+                      print = bquote(.(z) * X), deriv = bquote(1/.(z)), value = z))
+        } else if (z == 1) {
+           return(trafo(O, type = "go_back"))
+        } else if (z == -1) {
+           return(trafo(O, type = "update", trans = quote(-X), invtrans = quote(-X),
+                      print = quote(-X), deriv = quote(-1), value = z))
+        } else {
+           return(trafo(O, type = "update", trans = bquote(X/.(1/z)), invtrans = bquote(.(1/z) * X),
+                      print = bquote(X/.(1/z)), deriv = bquote(1/.(z)), value = z))
+        }
+    } else {
+        if (abs(x) > 1) {
+           return(trafo(O, type = "new", trans = bquote(.(x) * X), invtrans = bquote(X/.(x)),
+                      print = bquote(.(x) * X), deriv = bquote(1/.(x)), operation = "*", value = x))
+        } else if (x == -1) {
+           return(trafo(O, type = "new", trans = quote(-X), invtrans = quote(-X),
+                      print = quote(-X), deriv = quote(-1), operation = "*", value = x))
+        } else {
+           return(trafo(O, type = "new", trans = bquote(X/.(1/x)), invtrans = bquote(.(1/x) * X),
+                      print = bquote(X/.(1/x)), deriv = bquote(1/.(x)), operation = "*", value = x))
+        }
+    }
+}
+#' @rdname distrafo
+#' @export
+`/.dist` <- function(e1, e2) {
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2
+        if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+        if (x == 0) stop("not possible to devide with zero")
+        (1/x) * O
+    } else {
+        O <- e2
+        x <- e1
+        x * (O)^(-1)
+    }
+}
+
+#' @rdname distrafo
+#' @export
+`-.dist` <- function(e1, e2 = NULL) {
+    if (is.null(e2)) return(-1 * e1)
+    if (is.dist(e1)) {
+        if (!is.numeric(e2) || length(e2) != 1) stop("second argument must be a number")
+        e1 + -e2
+    } else {
+        if (!is.numeric(e1) || length(e1) != 1) stop("second argument must be a number")
+        -1 * e2 + e1
+    }
+}
+#' @rdname distrafo
+#' @export
+sqrt.dist <- function(x) {
+    x^(0.5)
+}
+
+
+#' @rdname distrafo
+#' @export
+log.univdist <- function(x, base = exp(1)) {
+    if (support_sign(x) != 1) stop("random variable needs non-negative support for log trafo")
+    if (!is.numeric(base) || length(base) != 1) stop("base must be a number")
+    if (base == exp(1)) {
+       return(trafo(x, type = "init", trans = quote(log(X)), invtrans = quote(exp(X)),
+                  print = quote(log(X)), deriv = quote(exp(X)), operation = "log", value = base))
+    } else {
+       return(trafo(x, type = "init", trans = bquote(log(X, base = .(base))), invtrans = bquote(.(base)^X),
+                  print = bquote(log(X, base = .(base))), deriv = bquote(.(base)^X * log(.(base))), operation = "log", value = base))
+    }
+}
+#' @rdname distrafo
+#' @export
+log.trans_univdist <- function(x, base = exp(1)) {
+    if (support_sign(x) != 1) stop("random variable needs non-negative support for log trafo")
+    if (!is.numeric(base) || length(base) != 1) stop("base must be a number")
+    if (base == exp(1)) {
+        if (last_history(x, 3) == "exp" & base == last_history(x, 4)) {
+           return(trafo(x, type = "go_back"))
+        } else {
+           return(trafo(x, type = "new", trans = quote(log(X)), invtrans = quote(exp(X)),
+                      print = quote(log(X)), deriv = quote(exp(X)), operation = "log", value = base))
+        }
+    } else {
+        if (last_history(x, 3) == "exp" & base == last_history(x, 4)) {
+           return(trafo(x, type = "go_back"))
+        } else {
+           return(trafo(x, type = "new", trans = bquote(log(X, base = .(base))), invtrans = bquote(.(base)^X),
+                      print = bquote(log(X, base = .(base))), deriv = bquote(.(base)^X * log(.(base))), operation = "log", value = base))
+        }
+    }
+}
+#' @rdname distrafo
+#' @export
+exp.univdist <- function(x) {
+   trafo(x, type = "init", trans = quote(exp(X)), invtrans = quote(log(X)),
+         print = quote(exp(X)), deriv = quote(1/X), operation = "exp", value = exp(1))
+}
+#' @rdname distrafo
+#' @export
+exp.trans_univdist <- function(x) {
+    if (last_history(x, 3) == "log" && exp(1) == last_history(x, 4)) {
+       return(trafo(x, type = "go_back"))
+    } else {
+       return(trafo(x, type = "new", trans = quote(exp(X)), invtrans = quote(log(X)),
+                  print = quote(exp(X)), deriv = quote(1/X), operation = "exp", value = exp(1)))
+    }
+}
+
+#' @rdname distrafo
+#' @export
+`^.univdist` <- function(e1, e2) {
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2  # power
+        if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+        if (x == 1) return(O)
+        if (x == 0) return(1)
+        if (x > 0) {
+            if (x > 1) {
+                if (x%%1 == 0) {
+                  if (x%%2 == 0) { # U increasing
+                    if (support_sign(O) == 1) {
+                      return(trafo(O, type = "init", trans = bquote(X^.(x)), invtrans = bquote(X^.(1/x)),
+                                 print = bquote(X^.(x)), deriv = bquote(X^.(1/x - 1) * .(1/x)), operation = "^", value = x))
+                    } else if (support_sign(O) == -1) { # decreasing
+                      return(trafo(O, type = "init", trans = bquote(X^.(x)), invtrans = bquote(-X^.(1/x)),
+                                 print = bquote(X^.(x)), deriv = bquote(-X^.(1/x - 1) * .(1/x)), operation = "^", value = x))
+                    } else { # R
+                      stop("non-monotonic transformation")
+                    }
+                  } else { # odd - monot+increasing
+                    return(trafo(O, type = "init", trans = bquote(X^.(x)), invtrans = bquote(sign(X) * abs(X)^.(1/x)),
+                               print = bquote(X^.(x)), deriv = bquote(abs(X)^(.(1/x) - 1) * .(1/x)), operation = "^", value = x))
+                  }
+                } else { # not integer - only positive support-sqrt
+                  if (support_sign(O) == 1) {
+                    return(trafo(O, type = "init", trans = bquote(X^.(x)), invtrans = bquote(X^.(1/x)),
+                               print = bquote(X^.(x)), deriv = bquote(X^(.(1/x) - 1) * .(1/x)), operation = "^", value = x))
+                  } else {
+                    stop("not defined transformation for non-positive support")
+                  }
+                }
+            } else { # sqrt
+                if ((1/x)%%2 == 1) {
+                  return(trafo(O, type = "init", trans = bquote(sign(X) * abs(X)^.(x)), invtrans = bquote(X^.(1/x)),
+                             print = bquote(X^(1/.(1/x))), deriv = bquote(X^.(1/x - 1) * .(1/x)), operation = "^", value = x))
+                } else if (support_sign(O) == 1) {
+                  return(trafo(O, type = "init", trans = bquote(X^.(x)), invtrans = bquote(X^.(1/x)),
+                             print = bquote(X^.(x)), deriv = bquote(X^.(1/x - 1) * .(1/x)), operation = "^", value = x))
+                } else {
+                  stop("not defined transformation for non-positive support")
+                }
+            }
+        } else { # negative
+            if (x == -1) {
+                if (support_sign(O) == 1 || support_sign(O) == -1) {
+                  return(trafo(O, type = "init", trans = bquote(1/X), invtrans = bquote(1/X),
+                             print = bquote(1/X), deriv = quote(-X^(-2)), operation = "^", value = x))
+                } else {
+                  stop("non-monotonic transformation")
+                }
+            } else {
+                return((O^(-1))^abs(x))
+            }
+        }
+    } else {
+        O <- e2
+        x <- e1  # exp
+        if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+        if (x == exp(1)) return(exp(O))
+        if (x <= 0) stop("exponential with non-positive base are not supported as they are not continuous")
+        return(trafo(O, type = "init", trans = bquote(.(x)^X), invtrans = bquote(log(X, base = .(x))),
+                   print = bquote(.(x)^X), deriv = bquote(1/(X * log(.(x)))), operation = "exp", value = x))
+    }
+}
+#' @rdname distrafo
+#' @export
+`^.trans_univdist` <- function(e1, e2) {
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2  # power
+        if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+        if (x == 1) return(O)
+        if (x == 0) return(1)
+        if (last_history(O, 3) == "^" && last_history(O, 4) * x == 1) {
+           return(trafo(O, type = "go_back"))
+        } else {
+            if (x > 0) {
+                if (x > 1) {
+                  if (x%%1 == 0) {
+                    if (x%%2 == 0) { # U increasing
+                      if (support_sign(O) == 1) {
+                         return(trafo(O, type = "new", trans = bquote(X^.(x)), invtrans = bquote(X^.(1/x)),
+                                    print = bquote(X^.(x)), deriv = bquote(X^.(1/x - 1) * .(1/x)), operation = "^", value = x))
+                      } else if (support_sign(O) == -1) { # decreasing
+                         return(trafo(O, type = "new", trans = bquote(X^.(x)), invtrans = bquote(-X^.(1/x)),
+                                    print = bquote(X^.(x)), deriv = bquote(-X^.(1/x - 1) * .(1/x)), operation = "^", value = x))
+                      } else { # R
+                        stop("non-monotonic transformation")
+                      }
+                    } else { # odd - monot+increasing
+                       return(trafo(O, type = "new", trans = bquote(X^.(x)), invtrans = bquote(sign(X) * abs(X)^.(1/x)),
+                                  print = bquote(X^.(x)), deriv = bquote(abs(X)^(.(1/x) - 1) * .(1/x)), operation = "^", value = x))
+                    }
+                  } else { # not integer - only positive support-sqrt
+                    if (support_sign(O) == 1) {
+                      return(trafo(O, type = "new", trans = bquote(X^.(x)), invtrans = bquote(X^.(1/x)),
+                                 print = bquote(X^.(x)), deriv = bquote(X^(.(1/x) - 1) * .(1/x)), operation = "^", value = x))
+                    } else {
+                      stop("not defined transformation for non-positive support")
+                    }
+                  }
+                } else { # sqrt
+                  if ((1/x)%%2 == 1) {
+                    return(trafo(O, type = "new", trans = bquote(sign(X) * abs(X)^.(x)), invtrans = bquote(X^.(1/x)),
+                               print = bquote(X^(1/.(1/x))), deriv = bquote(X^.(1/x - 1) * .(1/x)), operation = "^", value = x))
+                  } else if (support_sign(O) == 1) {
+                    return(trafo(O, type = "new", trans = bquote(X^.(x)), invtrans = bquote(X^.(1/x)),
+                               print = bquote(X^.(x)), deriv = bquote(X^.(1/x - 1) * .(1/x)), operation = "^", value = x))
+                  } else {
+                    stop("not defined transformation for non-positive support")
+                  }
+                }
+            } else { # negative
+                if (x == -1) {
+                  if (support_sign(O) == 1 || support_sign(O) == -1) { # decreasing
+                    return(trafo(O, type = "new", trans = bquote(1/X), invtrans = bquote(1/X),
+                               print = bquote(1/X), deriv = quote(-X^(-2)), operation = "^", value = x))
+                  } else {
+                    stop("non-monotonic transformation")
+                  }
+                } else {
+                  return((O^(-1))^(abs(x)))
+                }
+            }
+        }
+    } else {
+        O <- e2
+        x <- e1  # exp
+        if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+        if (x <= 0) stop("exponential with non-positive base are not supported as they are not continuous")
+        if (x == exp(1)) return(exp(O))
+        if (last_history(O, 3) == "log" & x == last_history(O, 4)) {
+           return(trafo(O, type = "go_back"))
+        } else {
+           return(trafo(O, type = "new", trans = bquote(.(x)^X), invtrans = bquote(log(X, base = .(x))),
+                      print = bquote(.(x)^X), deriv = bquote(1/(X * log(.(x)))), operation = "exp", value = x))
+        }
+    }
+}
+
+#' @rdname distrafo
+#' @export
+`+.normdist` <- function(e1, e2) {
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2
+    } else {
+        O <- e2
+        x <- e1
+    }
+    if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+    normdist(mean = O$parameters$mean + x, sd = O$parameters$sd)
+}
+#' @rdname distrafo
+#' @export
+`*.normdist` <- function(e1, e2) {
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2
+    } else {
+        O <- e2
+        x <- e1
+    }
+    if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+    if (x == 0) return(0)
+    if (x == 1) return(O)
+    normdist(mean = O$parameters$mean * x, sd = O$parameters$sd * abs(x))
+}
+#' @rdname distrafo
+#' @export
+exp.normdist <- function(x) {
+    lnormdist(meanlog = x$parameters$mean, sdlog = x$parameters$sd)
+}
+#' @rdname distrafo
+#' @export
+`*.expdist` <- function(e1, e2) {
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2
+    } else {
+        O <- e2
+        x <- e1
+    }
+    if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+    if (x == 0) return(0)
+    if (x == 1) return(O)
+    if (x > 0) {
+        expdist(rate = O$parameters$rate/x)
+    } else {
+        `*.univdist`(O, x)
+    }
+}
+#' @rdname distrafo
+#' @export
+`^.expdist` <- function(e1, e2) {
+    if (is.dist(e1) && is.numeric(e2) && length(e2) == 1 && e2 > 0) {
+        if (e2 == 1) return(e1)
+        weibulldist(shape = 1/e2, scale = (1/e1$parameters$rate)^e2)
+    } else {
+        `^.univdist`(e1, e2)
+    }
+}
+
+#' @rdname distrafo
+#' @export
+`+.unifdist` <- function(e1, e2) {
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2
+    } else {
+        O <- e2
+        x <- e1
+    }
+    if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+    unifdist(min = O$parameters$min + x, max = O$parameters$max + x)
+}
+#' @rdname distrafo
+#' @export
+`*.unifdist` <- function(e1, e2) {
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2
+    } else {
+        O <- e2
+        x <- e1
+    }
+    if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+    if (x == 0) return(0)
+    if (x == 1) return(O)
+    if (x > 0) {
+        unifdist(min = O$parameters$min * x, max = O$parameters$max * x)
+    } else {
+        unifdist(min = O$parameters$max * x, max = O$parameters$min * x)
+    }
+}
+#' @rdname distrafo
+#' @export
+`^.tdist` <- function(e1, e2) {
+    if (is.dist(e1) && is.numeric(e2) && length(e2) == 1 && abs(e2) == 2) {
+        if (e2 == 2) {
+            fdist(1, e1$parameters$df)
+        } else {
+            fdist(e1$parameters$df, 1)
+        }
+    } else {
+        `^.univdist`(e1, e2)
+    }
+}
+#' @rdname distrafo
+#' @export
+`^.fdist` <- function(e1, e2) {
+    if (is.dist(e1) && is.numeric(e2) && length(e2) == 1 && e2 == -1) {
+        fdist(df1 = e1$parameters$df2, df2 = e1$parameters$df1)
+    } else {
+        `^.univdist`(e1, e2)
+    }
+}
+#' @rdname distrafo
+#' @export
+`-.betadist` <- function(e1, e2 = NULL) {
+    if (is.null(e2)) return(-1 * e1)
+    if (is.dist(e2) && is.numeric(e1) && length(e1) == 1 && e1 == 1) {
+        betadist(shape1 = e2$parameters$shape2, shape2 = e2$parameters$shape1)
+    } else {
+        `-.dist`(e1, e2)
+    }
+}
+#' @rdname distrafo
+#' @export
+`-.binomdist` <- function(e1, e2 = NULL) {
+    if (is.null(e2)) return(-1 * e1)
+    if (is.dist(e2) && is.numeric(e1) && length(e1) == 1 && e1 == e2$parameters$size) {
+        binomdist(size = e2$parameters$size, prob = 1 - e2$parameters$prob)
+    } else {
+        `-.dist`(e1, e2)
+    }
+}
+#' @rdname distrafo
+#' @export
+`*.gammadist` <- function(e1, e2) {
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2
+    } else {
+        O <- e2
+        x <- e1
+    }
+    if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+    if (x == 0) return(0)
+    if (x == 1) return(O)
+    if (x > 0) {
+        if (names(O$parameters[2]) == "scale") {
+            gammadist(shape = O$parameters$shape, scale = O$parameters$scale * x)
+        } else {
+            gammadist(shape = O$parameters$shape, rate = O$parameters$rate/x)
+        }
+    } else {
+        `*.univdist`(O, x)
+    }
+}
+#' @rdname distrafo
+#' @export
+`+.cauchydist` <- function(e1, e2) {
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2
+    } else {
+        O <- e2
+        x <- e1
+    }
+    if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+    cauchydist(location = O$parameters$location + x, scale = O$parameters$scale)
+}
+#' @rdname distrafo
+#' @export
+`*.cauchydist` <- function(e1, e2) {
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2
+    } else {
+        O <- e2
+        x <- e1
+    }
+    if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+    if (x == 0) return(0)
+    if (x == 1) return(O)
+    cauchydist(location = O$parameters$location * x, scale = O$parameters$scale * abs(x))
+}
+#' @rdname distrafo
+#' @export
+`^.cauchydist` <- function(e1, e2) {
+    if (is.dist(e1) && is.numeric(e2) && length(e2) == 1 && e2 == -1) {
+        C <- e1$parameters$location^2 + e1$parameters$scale^2
+        cauchydist(location = e1$parameters$location/C, scale = e1$parameters$scale/C)
+    } else {
+        `^.univdist`(e1, e2)
+    }
+}
+#' @rdname distrafo
+#' @export
+`*.lnormdist` <- function(e1, e2) {
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2
+    } else {
+        O <- e2
+        x <- e1
+    }
+    if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+    if (x == 0) return(0)
+    if (x == 1) return(O)
+    if (x > 0) {
+        lnormdist(meanlog = O$parameters$meanlog + log(x), sdlog = O$parameters$sdlog)
+    } else {
+        `*.univdist`(e1, e2)
+    }
+}
+#' @rdname distrafo
+#' @export
+log.lnormdist <- function(x, base = exp(1)) {
+    if (is.numeric(base) && base == exp(1) && length(base) == 1) {
+        normdist(mean = x$parameters$meanlog, sd = x$parameters$sdlog)
+    } else {
+        log.univdist(x, base = base)
+    }
+}
+#' @rdname distrafo
+#' @export
+`^.lnormdist` <- function(e1, e2) {
+    if (is.dist(e1) && is.numeric(e2) && length(e2) == 1) {
+        lnormdist(meanlog = e1$parameters$meanlog * e2, sdlog = e1$parameters$sdlog * abs(e2))
+    } else {
+        `^.univdist`(e1, e2)
+    }
+}
+#' @rdname distrafo
+#' @export
+`*.weibulldist` <- function(e1, e2) {
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2
+    } else {
+        O <- e2
+        x <- e1
+    }
+    if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+    if (x == 0) return(0)
+    if (x == 1) return(O)
+    if (x > 0) {
+        weibulldist(shape = O$parameters$shape, scale = O$parameters$scale * x)
+    } else {
+        `*.univdist`(O, x)
+    }
+}
+#' @rdname distrafo
+#' @export
+`+.gumbeldist` <- function(e1, e2) {
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2
+    } else {
+        O <- e2
+        x <- e1
+    }
+    if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+    gumbeldist(loc = O$parameters$loc + x, scale = O$parameters$scale)
+}
+#' @rdname distrafo
+#' @export
+`*.gumbeldist` <- function(e1, e2) {
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2
+    } else {
+        O <- e2
+        x <- e1
+    }
+    if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+    if (x == 0) return(0)
+    if (x == 1) return(O)
+    if (x > 0) {
+        gumbeldist(loc = O$parameters$loc * x, scale = O$parameters$scale * x)
+    } else {
+        `*.univdist`(O, x)
+    }
+}
+#' @rdname distrafo
+#' @export
+`+.frechetdist` <- function(e1, e2) {
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2
+    } else {
+        O <- e2
+        x <- e1
+    }
+    if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+    frechetdist(loc = O$parameters$loc + x, scale = O$parameters$scale, shape = O$parameters$shape)
+}
+#' @rdname distrafo
+#' @export
+`*.frechetdist` <- function(e1, e2) {
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2
+    } else {
+        O <- e2
+        x <- e1
+    }
+    if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+    if (x == 0) return(0)
+    if (x == 1) return(O)
+    if (x > 0) {
+        frechetdist(loc = O$parameters$loc * x, scale = O$parameters$scale * x, shape = O$parameters$shape)
+    } else {
+        `*.univdist`(O, x)
+    }
+}
+#' @rdname distrafo
+#' @export
+`*.paretodist` <- function(e1, e2) {
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2
+    } else {
+        O <- e2
+        x <- e1
+    }
+    if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+    if (x == 0) return(0)
+    if (x == 1) return(O)
+    if (x > 0) {
+        paretodist(scale = O$parameters$scale * x, shape = O$parameters$shape)
+    } else {
+        `*.univdist`(O, x)
+    }
+}
+#' @rdname distrafo
+#' @export
+`+.GPDdist` <- function(e1, e2) {
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2
+    } else {
+        O <- e2
+        x <- e1
+    }
+    if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+    GPDdist(loc = O$parameters$loc + x, scale = O$parameters$scale, shape = O$parameters$shape)
+}
+#' @rdname distrafo
+#' @export
+`*.GPDdist` <- function(e1, e2) {
+    if (is.dist(e1)) {
+        O <- e1
+        x <- e2
+    } else {
+        O <- e2
+        x <- e1
+    }
+    if (!is.numeric(x) || length(x) != 1) stop("second argument must be a number")
+    if (x == 0) return(0)
+    if (x == 1) return(O)
+    if (x > 0) {
+        GPDdist(loc = O$parameters$loc * x, scale = O$parameters$scale * x, shape = O$parameters$shape)
+    } else {
+        `*.univdist`(O, x)
+    }
+}

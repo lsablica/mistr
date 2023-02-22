@@ -1,0 +1,10 @@
+## Test environments
+* local Ubuntu 16.04.1 LTS, R 3.6.3
+* win-builder 
+* R-hub
+
+## R CMD check results
+There were no ERRORs or WARNINGs or NOTEs.
+
+## Downstream dependencies
+none
